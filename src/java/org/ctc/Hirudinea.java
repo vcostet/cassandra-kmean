@@ -19,9 +19,8 @@ public class Hirudinea
 			info_station.add(entry);
 			stations.putIfAbsent(nom_station, info_station);
 		}
+
     }
-
-
 
 
 }
