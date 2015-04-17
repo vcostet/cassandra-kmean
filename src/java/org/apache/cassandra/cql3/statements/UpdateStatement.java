@@ -30,8 +30,6 @@ import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
-import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
-
 /**
  * An <code>UPDATE</code> statement parsed from a CQL query statement.
  *
@@ -85,7 +83,7 @@ public class UpdateStatement extends ModificationStatement
         if (cfm.comparator.isDense())
         {
             if (prefix.isEmpty())
-                throw new InvalidRequestException(String.format("Missing PRIMARY KEY part %s", cfm.clusteringColumns().get(0)));
+                throw new InvalidRequestException(String.format("Missing PRIMARY KEY part %s", cfm.clusteringColumns().iterator().next()));
 
             // An empty name for the compact value is what we use to recognize the case where there is not column
             // outside the PK, see CreateStatement.
@@ -118,12 +116,12 @@ public class UpdateStatement extends ModificationStatement
     }
 
     /**
-     * Checks if the values of the indexed columns are valid.
+     * Checks that the value of the indexed columns is valid.
      *
      * @param cf the column family
-     * @throws InvalidRequestException if one of the values of the indexed columns is not valid
+     * @throws InvalidRequestException if one of the values is invalid
      */
-    private void validateIndexedColumns(ColumnFamily cf)
+    private void validateIndexedColumns(ColumnFamily cf) throws InvalidRequestException
     {
         SecondaryIndexManager indexManager = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfId).indexManager;
         if (indexManager.hasIndexes())
@@ -132,11 +130,11 @@ public class UpdateStatement extends ModificationStatement
             {
                 // Indexed values must be validated by any applicable index. See CASSANDRA-3057/4240/8081 for more details
                 if (!indexManager.validate(cell))
-                    throw invalidRequest("Can't index column value of size %d for index %s on %s.%s",
-                                         cell.value().remaining(),
-                                         cfm.getColumnDefinition(cell.name()).getIndexName(),
-                                         cfm.ksName,
-                                         cfm.cfName);
+                    throw new InvalidRequestException(String.format("Can't index column value of size %d for index %s on %s.%s",
+                                                                    cell.value().remaining(),
+                                                                    cfm.getColumnDefinition(cell.name()).getIndexName(),
+                                                                    cfm.ksName,
+                                                                    cfm.cfName));
             }
         }
     }
@@ -150,15 +148,13 @@ public class UpdateStatement extends ModificationStatement
          * A parsed <code>INSERT</code> statement.
          *
          * @param name column family being operated on
-         * @param attrs additional attributes for statement (CL, timestamp, timeToLive)
          * @param columnNames list of column names
          * @param columnValues list of column values (corresponds to names)
-         * @param ifNotExists true if an IF NOT EXISTS condition was specified, false otherwise
+         * @param attrs additional attributes for statement (CL, timestamp, timeToLive)
          */
         public ParsedInsert(CFName name,
                             Attributes.Raw attrs,
-                            List<ColumnIdentifier.Raw> columnNames,
-                            List<Term.Raw> columnValues,
+                            List<ColumnIdentifier.Raw> columnNames, List<Term.Raw> columnValues,
                             boolean ifNotExists)
         {
             super(name, attrs, null, ifNotExists, false);
@@ -168,20 +164,16 @@ public class UpdateStatement extends ModificationStatement
 
         protected ModificationStatement prepareInternal(CFMetaData cfm, VariableSpecifications boundNames, Attributes attrs) throws InvalidRequestException
         {
-            UpdateStatement stmt = new UpdateStatement(ModificationStatement.StatementType.INSERT, boundNames.size(), cfm, attrs);
+            UpdateStatement stmt = new UpdateStatement(ModificationStatement.StatementType.INSERT,boundNames.size(), cfm, attrs);
 
             // Created from an INSERT
             if (stmt.isCounter())
-                throw new InvalidRequestException("INSERT statements are not allowed on counter tables, use UPDATE instead");
-
-            if (columnNames == null)
-                throw new InvalidRequestException("Column names for INSERT must be provided when using VALUES");
-            if (columnNames.isEmpty())
-                throw new InvalidRequestException("No columns provided to INSERT");
+                throw new InvalidRequestException("INSERT statement are not allowed on counter tables, use UPDATE instead");
             if (columnNames.size() != columnValues.size())
                 throw new InvalidRequestException("Unmatched column names/values");
+            if (columnNames.isEmpty())
+                throw new InvalidRequestException("No columns provided to INSERT");
 
-            String ks = keyspace();
             for (int i = 0; i < columnNames.size(); i++)
             {
                 ColumnIdentifier id = columnNames.get(i).prepare(cfm);
@@ -197,54 +189,22 @@ public class UpdateStatement extends ModificationStatement
                 }
 
                 Term.Raw value = columnValues.get(i);
-                if (def.isPrimaryKeyColumn())
+
+                switch (def.kind)
                 {
-                    Term t = value.prepare(ks, def);
-                    t.collectMarkerSpecification(boundNames);
-                    stmt.addKeyValue(def, t);
-                }
-                else
-                {
-                    Operation operation = new Operation.SetValue(value).prepare(ks, def);
-                    operation.collectMarkerSpecification(boundNames);
-                    stmt.addOperation(operation);
+                    case PARTITION_KEY:
+                    case CLUSTERING_COLUMN:
+                        Term t = value.prepare(keyspace(), def);
+                        t.collectMarkerSpecification(boundNames);
+                        stmt.addKeyValue(def, t);
+                        break;
+                    default:
+                        Operation operation = new Operation.SetValue(value).prepare(keyspace(), def);
+                        operation.collectMarkerSpecification(boundNames);
+                        stmt.addOperation(operation);
+                        break;
                 }
             }
-
-            return stmt;
-        }
-    }
-
-    /**
-     * A parsed INSERT JSON statement.
-     */
-    public static class ParsedInsertJson extends ModificationStatement.Parsed
-    {
-        private final Json.Raw jsonValue;
-
-        public ParsedInsertJson(CFName name, Attributes.Raw attrs, Json.Raw jsonValue, boolean ifNotExists)
-        {
-            super(name, attrs, null, ifNotExists, false);
-            this.jsonValue = jsonValue;
-        }
-
-        protected ModificationStatement prepareInternal(CFMetaData cfm, VariableSpecifications boundNames, Attributes attrs) throws InvalidRequestException
-        {
-            UpdateStatement stmt = new UpdateStatement(ModificationStatement.StatementType.INSERT, boundNames.size(), cfm, attrs);
-            if (stmt.isCounter())
-                throw new InvalidRequestException("INSERT statements are not allowed on counter tables, use UPDATE instead");
-
-            Collection<ColumnDefinition> defs = cfm.allColumns();
-            Json.Prepared prepared = jsonValue.prepareAndCollectMarkers(cfm, defs, boundNames);
-
-            for (ColumnDefinition def : defs)
-            {
-                if (def.isPrimaryKeyColumn())
-                    stmt.addKeyValue(def, prepared.getPrimaryKeyValueForColumn(def));
-                else
-                    stmt.addOperation(prepared.getSetOperationForColumn(def));
-            }
-
             return stmt;
         }
     }

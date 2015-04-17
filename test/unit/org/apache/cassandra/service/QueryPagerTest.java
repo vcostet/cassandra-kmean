@@ -29,15 +29,11 @@ import org.junit.runner.RunWith;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.dht.*;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -47,31 +43,10 @@ import static org.apache.cassandra.Util.range;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
-public class QueryPagerTest
+public class QueryPagerTest extends SchemaLoader
 {
-    public static final String KEYSPACE1 = "QueryPagerTest";
-    public static final String CF_STANDARD = "Standard1";
-    public static final String KEYSPACE_CQL = "cql_keyspace";
-    public static final String CF_CQL = "table2";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD));
-        SchemaLoader.createKeyspace(KEYSPACE_CQL,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    CFMetaData.compile("CREATE TABLE " + CF_CQL + " ("
-                                                     + "k text,"
-                                                     + "c text,"
-                                                     + "v text,"
-                                                     + "PRIMARY KEY (k, c))", KEYSPACE_CQL));
-        addData();
-    }
+    private static final String KS = "Keyspace1";
+    private static final String CF = "Standard1";
 
     private static String string(CellName name)
     {
@@ -90,6 +65,7 @@ public class QueryPagerTest
         }
     }
 
+    @BeforeClass
     public static void addData()
     {
         cfs().clearUnsafe();
@@ -105,8 +81,8 @@ public class QueryPagerTest
          */
         for (int i = 0; i < nbKeys; i++)
         {
-            Mutation rm = new Mutation(KEYSPACE1, bytes("k" + i));
-            ColumnFamily cf = rm.addOrGet(CF_STANDARD);
+            Mutation rm = new Mutation(KS, bytes("k" + i));
+            ColumnFamily cf = rm.addOrGet(CF);
 
             for (int j = 0; j < nbCols; j++)
                 cf.addColumn(Util.column("c" + j, "", 0));
@@ -117,7 +93,7 @@ public class QueryPagerTest
 
     private static ColumnFamilyStore cfs()
     {
-        return Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD);
+        return Keyspace.open(KS).getColumnFamilyStore(CF);
     }
 
     private static String toString(List<Row> rows)
@@ -144,7 +120,7 @@ public class QueryPagerTest
         SortedSet<CellName> s = new TreeSet<CellName>(cfs().metadata.comparator);
         for (String name : names)
             s.add(CellNames.simpleDense(bytes(name)));
-        return new SliceByNamesReadCommand(KEYSPACE1, bytes(key), CF_STANDARD, System.currentTimeMillis(), new NamesQueryFilter(s, true));
+        return new SliceByNamesReadCommand(KS, bytes(key), CF, System.currentTimeMillis(), new NamesQueryFilter(s, true));
     }
 
     private static ReadCommand sliceQuery(String key, String start, String end, int count)
@@ -156,7 +132,7 @@ public class QueryPagerTest
     {
         SliceQueryFilter filter = new SliceQueryFilter(CellNames.simpleDense(bytes(start)), CellNames.simpleDense(bytes(end)), reversed, count);
         // Note: for MultiQueryTest, we need the same timestamp/expireBefore for all queries, so we just use 0 as it doesn't matter here.
-        return new SliceFromReadCommand(KEYSPACE1, bytes(key), CF_STANDARD, 0, filter);
+        return new SliceFromReadCommand(KS, bytes(key), CF, 0, filter);
     }
 
     private static RangeSliceCommand rangeNamesQuery(AbstractBounds<RowPosition> range, int count, String... names)
@@ -164,13 +140,13 @@ public class QueryPagerTest
         SortedSet<CellName> s = new TreeSet<CellName>(cfs().metadata.comparator);
         for (String name : names)
             s.add(CellNames.simpleDense(bytes(name)));
-        return new RangeSliceCommand(KEYSPACE1, CF_STANDARD, System.currentTimeMillis(), new NamesQueryFilter(s, true), range, count);
+        return new RangeSliceCommand(KS, CF, System.currentTimeMillis(), new NamesQueryFilter(s, true), range, count);
     }
 
     private static RangeSliceCommand rangeSliceQuery(AbstractBounds<RowPosition> range, int count, String start, String end)
     {
         SliceQueryFilter filter = new SliceQueryFilter(CellNames.simpleDense(bytes(start)), CellNames.simpleDense(bytes(end)), false, Integer.MAX_VALUE);
-        return new RangeSliceCommand(KEYSPACE1, CF_STANDARD, System.currentTimeMillis(), filter, range, count);
+        return new RangeSliceCommand(KS, CF, System.currentTimeMillis(), filter, range, count);
     }
 
     private static void assertRow(Row r, String key, String... names)

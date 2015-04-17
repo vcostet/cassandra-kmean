@@ -19,7 +19,13 @@ package org.apache.cassandra.db;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Future;
@@ -35,7 +41,7 @@ import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.filter.QueryFilter;
 import org.apache.cassandra.db.index.SecondaryIndex;
 import org.apache.cassandra.db.index.SecondaryIndexManager;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.QueryPagers;
@@ -48,12 +54,10 @@ import org.apache.cassandra.metrics.KeyspaceMetrics;
  */
 public class Keyspace
 {
+    public static final String SYSTEM_KS = "system";
     private static final int DEFAULT_PAGE_SIZE = 10000;
 
     private static final Logger logger = LoggerFactory.getLogger(Keyspace.class);
-
-    private static final String TEST_FAIL_WRITES_KS = System.getProperty("cassandra.test.fail_writes_ks", "");
-    private static final boolean TEST_FAIL_WRITES = !TEST_FAIL_WRITES_KS.isEmpty();
 
     public final KeyspaceMetrics metric;
 
@@ -61,7 +65,7 @@ public class Keyspace
     // proper directories here as well as in CassandraDaemon.
     static
     {
-        if (!Config.isClientMode())
+        if (!(Config.isClientMode() || StorageService.instance.isClientMode()))
             DatabaseDescriptor.createAllDirectories();
     }
 
@@ -69,7 +73,7 @@ public class Keyspace
     public final OpOrder writeOrder = new OpOrder();
 
     /* ColumnFamilyStore per column family */
-    private final ConcurrentMap<UUID, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
+    private final ConcurrentMap<UUID, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<UUID, ColumnFamilyStore>();
     private volatile AbstractReplicationStrategy replicationStrategy;
 
     public static final Function<String,Keyspace> keyspaceTransformer = new Function<String, Keyspace>()
@@ -88,7 +92,7 @@ public class Keyspace
 
     public static Keyspace open(String keyspaceName)
     {
-        assert initialized || keyspaceName.equals(SystemKeyspace.NAME);
+        assert initialized || keyspaceName.equals(SYSTEM_KS);
         return open(keyspaceName, Schema.instance, true);
     }
 
@@ -203,7 +207,7 @@ public class Keyspace
         }
 
         if ((columnFamilyName != null) && !tookSnapShot)
-            throw new IOException("Failed taking snapshot. Table " + columnFamilyName + " does not exist.");
+            throw new IOException("Failed taking snapshot. Column family " + columnFamilyName + " does not exist.");
     }
 
     /**
@@ -254,7 +258,7 @@ public class Keyspace
      */
     public List<SSTableReader> getAllSSTables()
     {
-        List<SSTableReader> list = new ArrayList<>(columnFamilyStores.size());
+        List<SSTableReader> list = new ArrayList<SSTableReader>(columnFamilyStores.size());
         for (ColumnFamilyStore cfStore : columnFamilyStores.values())
             list.addAll(cfStore.getSSTables());
         return list;
@@ -267,7 +271,7 @@ public class Keyspace
         createReplicationStrategy(metadata);
 
         this.metric = new KeyspaceMetrics(this);
-        for (CFMetaData cfm : new ArrayList<>(metadata.cfMetaData().values()))
+        for (CFMetaData cfm : new ArrayList<CFMetaData>(metadata.cfMetaData().values()))
         {
             logger.debug("Initializing {}.{}", getName(), cfm.cfName);
             initCf(cfm.cfId, cfm.cfName, loadSSTables);
@@ -354,9 +358,6 @@ public class Keyspace
      */
     public void apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
     {
-        if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
-            throw new RuntimeException("Testing write failures");
-
         try (OpOrder.Group opGroup = writeOrder.start())
         {
             // write the mutation to the commitlog and memtables
@@ -373,7 +374,7 @@ public class Keyspace
                 ColumnFamilyStore cfs = columnFamilyStores.get(cf.id());
                 if (cfs == null)
                 {
-                    logger.error("Attempting to mutate non-existant table {}", cf.id());
+                    logger.error("Attempting to mutate non-existant column family {}", cf.id());
                     continue;
                 }
 
@@ -422,80 +423,10 @@ public class Keyspace
 
     public List<Future<?>> flush()
     {
-        List<Future<?>> futures = new ArrayList<>(columnFamilyStores.size());
-        for (ColumnFamilyStore cfs : columnFamilyStores.values())
-            futures.add(cfs.forceFlush());
+        List<Future<?>> futures = new ArrayList<Future<?>>(columnFamilyStores.size());
+        for (UUID cfId : columnFamilyStores.keySet())
+            futures.add(columnFamilyStores.get(cfId).forceFlush());
         return futures;
-    }
-
-    public Iterable<ColumnFamilyStore> getValidColumnFamilies(boolean allowIndexes, boolean autoAddIndexes, String... cfNames) throws IOException
-    {
-        Set<ColumnFamilyStore> valid = new HashSet<>();
-
-        if (cfNames.length == 0)
-        {
-            // all stores are interesting
-            for (ColumnFamilyStore cfStore : getColumnFamilyStores())
-            {
-                valid.add(cfStore);
-                if (autoAddIndexes)
-                {
-                    for (SecondaryIndex si : cfStore.indexManager.getIndexes())
-                    {
-                        if (si.getIndexCfs() != null) {
-                            logger.info("adding secondary index {} to operation", si.getIndexName());
-                            valid.add(si.getIndexCfs());
-                        }
-                    }
-
-                }
-            }
-            return valid;
-        }
-        // filter out interesting stores
-        for (String cfName : cfNames)
-        {
-            //if the CF name is an index, just flush the CF that owns the index
-            String baseCfName = cfName;
-            String idxName = null;
-            if (cfName.contains(".")) // secondary index
-            {
-                if(!allowIndexes)
-                {
-                    logger.warn("Operation not allowed on secondary Index table ({})", cfName);
-                    continue;
-                }
-
-                String[] parts = cfName.split("\\.", 2);
-                baseCfName = parts[0];
-                idxName = parts[1];
-            }
-
-            ColumnFamilyStore cfStore = getColumnFamilyStore(baseCfName);
-            if (idxName != null)
-            {
-                Collection< SecondaryIndex > indexes = cfStore.indexManager.getIndexesByNames(new HashSet<>(Arrays.asList(cfName)));
-                if (indexes.isEmpty())
-                    throw new IllegalArgumentException(String.format("Invalid index specified: %s/%s.", baseCfName, idxName));
-                else
-                    valid.add(Iterables.get(indexes, 0).getIndexCfs());
-            }
-            else
-            {
-                valid.add(cfStore);
-                if(autoAddIndexes)
-                {
-                    for(SecondaryIndex si : cfStore.indexManager.getIndexes())
-                    {
-                        if (si.getIndexCfs() != null) {
-                            logger.info("adding secondary index {} to operation", si.getIndexName());
-                            valid.add(si.getIndexCfs());
-                        }
-                    }
-                }
-            }
-        }
-        return valid;
     }
 
     public static Iterable<Keyspace> all()
@@ -510,7 +441,7 @@ public class Keyspace
 
     public static Iterable<Keyspace> system()
     {
-        return Iterables.transform(Collections.singleton(SystemKeyspace.NAME), keyspaceTransformer);
+        return Iterables.transform(Schema.systemKeyspaceNames, keyspaceTransformer);
     }
 
     @Override

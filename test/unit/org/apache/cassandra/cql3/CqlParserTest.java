@@ -36,7 +36,7 @@ public class CqlParserTest
         SyntaxErrorCounter firstCounter = new SyntaxErrorCounter();
         SyntaxErrorCounter secondCounter = new SyntaxErrorCounter();
 
-        CharStream stream = new ANTLRStringStream("SELECT * FORM users");
+        CharStream stream = new ANTLRStringStream("SELECT * FORM test;");
         CqlLexer lexer = new CqlLexer(stream);
 
         TokenStream tokenStream = new CommonTokenStream(lexer);

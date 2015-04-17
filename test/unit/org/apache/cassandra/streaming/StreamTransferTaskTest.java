@@ -22,55 +22,39 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import junit.framework.Assert;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
-public class StreamTransferTaskTest
+public class StreamTransferTaskTest extends SchemaLoader
 {
-    public static final String KEYSPACE1 = "StreamTransferTaskTest";
-    public static final String CF_STANDARD = "Standard1";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD));
-    }
-
     @Test
     public void testScheduleTimeout() throws Exception
     {
-        String ks = KEYSPACE1;
+        String ks = "Keyspace1";
         String cf = "Standard1";
 
         InetAddress peer = FBUtilities.getBroadcastAddress();
-        StreamSession session = new StreamSession(peer, peer, null, 0, true);
+        StreamSession session = new StreamSession(peer, peer, null, 0);
         ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore(cf);
 
         // create two sstables
         for (int i = 0; i < 2; i++)
         {
-            SchemaLoader.insertData(ks, cf, i, 1);
+            insertData(ks, cf, i, 1);
             cfs.forceBlockingFlush();
         }
 

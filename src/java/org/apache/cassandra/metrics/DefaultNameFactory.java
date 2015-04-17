@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.metrics;
 
+import com.yammer.metrics.core.MetricName;
 
 /**
  * MetricNameFactory that generates default MetricName of metrics.
@@ -39,14 +40,14 @@ public class DefaultNameFactory implements MetricNameFactory
         this.scope = scope;
     }
 
-    public CassandraMetricsRegistry.MetricName createMetricName(String metricName)
+    public MetricName createMetricName(String metricName)
     {
         return createMetricName(type, metricName, scope);
     }
 
-    public static CassandraMetricsRegistry.MetricName createMetricName(String type, String metricName, String scope)
+    public static MetricName createMetricName(String type, String metricName, String scope)
     {
-        return new CassandraMetricsRegistry.MetricName(GROUP_NAME, type, metricName, scope, createDefaultMBeanName(type, metricName, scope));
+        return new MetricName(GROUP_NAME, type, metricName, scope, createDefaultMBeanName(type, metricName, scope));
     }
 
     protected static String createDefaultMBeanName(String type, String name, String scope)

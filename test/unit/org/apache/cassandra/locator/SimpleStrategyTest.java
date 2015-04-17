@@ -26,39 +26,25 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 
-import org.junit.BeforeClass;
+import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.KSMetaData;
-import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.*;
-import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
-import org.apache.cassandra.dht.OrderPreservingPartitioner.StringToken;
-import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.StorageServiceAccessor;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.*;
 
-public class SimpleStrategyTest
+public class SimpleStrategyTest extends SchemaLoader
 {
-    public static final String KEYSPACE1 = "SimpleStrategyTest";
-
-    @BeforeClass
-    public static void defineSchema() throws Exception
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1));
-    }
-
     @Test
     public void tryValidKeyspace()
     {
-        assert Keyspace.open(KEYSPACE1).getReplicationStrategy() != null;
+        assert Keyspace.open("Keyspace1").getReplicationStrategy() != null;
     }
 
     @Test
@@ -76,7 +62,7 @@ public class SimpleStrategyTest
     @Test
     public void testStringEndpoints() throws UnknownHostException
     {
-        IPartitioner partitioner = OrderPreservingPartitioner.instance;
+        IPartitioner partitioner = new OrderPreservingPartitioner();
 
         List<Token> endpointTokens = new ArrayList<Token>();
         List<Token> keyTokens = new ArrayList<Token>();

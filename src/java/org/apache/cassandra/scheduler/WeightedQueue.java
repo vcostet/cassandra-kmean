@@ -26,7 +26,7 @@ import javax.management.ObjectName;
 
 import org.apache.cassandra.metrics.LatencyMetrics;
 
-class WeightedQueue
+class WeightedQueue implements WeightedQueueMBean
 {
     private final LatencyMetrics metric;
 
@@ -39,6 +39,20 @@ class WeightedQueue
         this.weight = weight;
         this.queue = new SynchronousQueue<Entry>(true);
         this.metric =  new LatencyMetrics("scheduler", "WeightedQueue", key);
+    }
+
+    public void register()
+    {
+        // expose monitoring data
+        MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
+        try
+        {
+            mbs.registerMBean(this, new ObjectName("org.apache.cassandra.scheduler:type=WeightedQueue,queue=" + key));
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     public void put(Thread t, long timeoutMS) throws InterruptedException, TimeoutException
@@ -70,5 +84,32 @@ class WeightedQueue
         {
             this.thread = thread;
         }
+    }
+
+    /** MBean related methods */
+
+    public long getOperations()
+    {
+        return metric.latency.count();
+    }
+
+    public long getTotalLatencyMicros()
+    {
+        return metric.totalLatency.count();
+    }
+
+    public double getRecentLatencyMicros()
+    {
+        return metric.getRecentLatency();
+    }
+
+    public long[] getTotalLatencyHistogramMicros()
+    {
+        return metric.totalLatencyHistogram.getBuckets(false);
+    }
+
+    public long[] getRecentLatencyHistogramMicros()
+    {
+        return metric.recentLatencyHistogram.getBuckets(true);
     }
 }

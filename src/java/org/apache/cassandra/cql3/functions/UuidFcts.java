@@ -26,9 +26,9 @@ import org.apache.cassandra.serializers.UUIDSerializer;
 
 public abstract class UuidFcts
 {
-    public static final Function uuidFct = new NativeScalarFunction("uuid", UUIDType.instance)
+    public static final Function uuidFct = new AbstractFunction("uuid", UUIDType.instance)
     {
-        public ByteBuffer execute(int protocolVersion, List<ByteBuffer> parameters)
+        public ByteBuffer execute(List<ByteBuffer> parameters)
         {
             return UUIDSerializer.instance.serialize(UUID.randomUUID());
         }

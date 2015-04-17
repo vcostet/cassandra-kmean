@@ -18,10 +18,9 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
+import java.text.ParseException;
 import java.util.Date;
 
-import org.apache.cassandra.cql3.Constants;
-import org.apache.cassandra.cql3.Term;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,6 +29,7 @@ import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.TimestampSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.commons.lang3.time.DateUtils;
 
 public class DateType extends AbstractType<Date>
 {
@@ -54,30 +54,6 @@ public class DateType extends AbstractType<Date>
           return ByteBufferUtil.EMPTY_BYTE_BUFFER;
 
       return ByteBufferUtil.bytes(TimestampSerializer.dateStringToTimestamp(source));
-    }
-
-    @Override
-    public Term fromJSONObject(Object parsed) throws MarshalException
-    {
-        if (parsed instanceof Long)
-            return new Constants.Value(ByteBufferUtil.bytes((Long) parsed));
-
-        try
-        {
-            return new Constants.Value(TimestampType.instance.fromString((String) parsed));
-        }
-        catch (ClassCastException exc)
-        {
-            throw new MarshalException(String.format(
-                    "Expected a long or a datestring representation of a date value, but got a %s: %s",
-                    parsed.getClass().getSimpleName(), parsed));
-        }
-    }
-
-    @Override
-    public String toJSONString(ByteBuffer buffer, int protocolVersion)
-    {
-        return '"' + TimestampSerializer.TO_JSON_FORMAT.format(TimestampSerializer.instance.deserialize(buffer)) + '"';
     }
 
     @Override

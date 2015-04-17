@@ -32,15 +32,17 @@ import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.filter.ColumnSlice;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A CQL3 condition on the value of a column or collection element.  For example, "UPDATE .. IF a = 0".
  */
 public class ColumnCondition
 {
+    private static final Logger logger = LoggerFactory.getLogger(ColumnCondition.class);
 
     public final ColumnDefinition column;
 
@@ -60,7 +62,7 @@ public class ColumnCondition
         this.inValues = inValues;
         this.operator = op;
 
-        if (operator != Operator.IN)
+        if (!operator.equals(Operator.IN))
             assert this.inValues == null;
     }
 
@@ -94,19 +96,6 @@ public class ColumnCondition
         return new ColumnCondition(column, collectionElement, inMarker, null, Operator.IN);
     }
 
-    public boolean usesFunction(String ksName, String functionName)
-    {
-        if (collectionElement != null && collectionElement.usesFunction(ksName, functionName))
-            return true;
-        if (value != null && value.usesFunction(ksName, functionName))
-            return true;
-        if (inValues != null)
-            for (Term value : inValues)
-                if (value != null && value.usesFunction(ksName, functionName))
-                    return true;
-        return false;
-    }
-
     /**
      * Collects the column specification for the bind variables of this operation.
      *
@@ -118,7 +107,7 @@ public class ColumnCondition
         if (collectionElement != null)
             collectionElement.collectMarkerSpecification(boundNames);
 
-        if ((operator == Operator.IN) && inValues != null)
+        if (operator.equals(Operator.IN) && inValues != null)
         {
             for (Term value : inValues)
                 value.collectMarkerSpecification(boundNames);
@@ -131,7 +120,7 @@ public class ColumnCondition
 
     public ColumnCondition.Bound bind(QueryOptions options) throws InvalidRequestException
     {
-        boolean isInCondition = operator == Operator.IN;
+        boolean isInCondition = operator.equals(Operator.IN);
         if (column.type instanceof CollectionType)
         {
             if (collectionElement == null)
@@ -187,7 +176,7 @@ public class ColumnCondition
             else if (otherValue == null)
             {
                 // the condition value is not null, so only NEQ can return true
-                return operator == Operator.NEQ;
+                return operator.equals(Operator.NEQ);
             }
             int comparison = type.compare(otherValue, value);
             switch (operator)
@@ -237,7 +226,7 @@ public class ColumnCondition
         {
             super(condition.column, condition.operator);
             assert !(column.type instanceof CollectionType) && condition.collectionElement == null;
-            assert condition.operator != Operator.IN;
+            assert !condition.operator.equals(Operator.IN);
             this.value = condition.value.bindAndGet(options);
         }
 
@@ -259,7 +248,7 @@ public class ColumnCondition
         {
             super(condition.column, condition.operator);
             assert !(column.type instanceof CollectionType) && condition.collectionElement == null;
-            assert condition.operator == Operator.IN;
+            assert condition.operator.equals(Operator.IN);
             if (condition.inValues == null)
                 this.inValues = ((Lists.Marker) condition.value).bind(options).getElements();
             else
@@ -292,7 +281,7 @@ public class ColumnCondition
         {
             super(condition.column, condition.operator);
             assert column.type instanceof CollectionType && condition.collectionElement != null;
-            assert condition.operator != Operator.IN;
+            assert !condition.operator.equals(Operator.IN);
             this.collectionElement = condition.collectionElement.bindAndGet(options);
             this.value = condition.value.bindAndGet(options);
         }
@@ -345,7 +334,7 @@ public class ColumnCondition
             return idx;
         }
 
-        static ByteBuffer getListItem(Iterator<Cell> iter, int index)
+        static ByteBuffer getListItem(Iterator<Cell> iter, int index) throws InvalidRequestException
         {
             int adv = Iterators.advance(iter, index);
             if (adv == index && iter.hasNext())
@@ -464,15 +453,13 @@ public class ColumnCondition
     static class CollectionBound extends Bound
     {
         private final Term.Terminal value;
-        private final QueryOptions options;
 
         private CollectionBound(ColumnCondition condition, QueryOptions options) throws InvalidRequestException
         {
             super(condition.column, condition.operator);
             assert column.type.isCollection() && condition.collectionElement == null;
-            assert condition.operator != Operator.IN;
+            assert !condition.operator.equals(Operator.IN);
             this.value = condition.value.bind(options);
-            this.options = options;
         }
 
         public boolean appliesTo(Composite rowPrefix, ColumnFamily current, final long now) throws InvalidRequestException
@@ -484,9 +471,9 @@ public class ColumnCondition
                 Iterator<Cell> iter = collectionColumns(current.metadata().comparator.create(rowPrefix, column), current, now);
                 if (value == null)
                 {
-                    if (operator == Operator.EQ)
+                    if (operator.equals(Operator.EQ))
                         return !iter.hasNext();
-                    else if (operator == Operator.NEQ)
+                    else if (operator.equals(Operator.NEQ))
                         return iter.hasNext();
                     else
                         throw new InvalidRequestException(String.format("Invalid comparison with null for operator \"%s\"", operator));
@@ -510,11 +497,11 @@ public class ColumnCondition
             // make sure we use v3 serialization format for comparison
             ByteBuffer conditionValue;
             if (type.kind == CollectionType.Kind.LIST)
-                conditionValue = ((Lists.Value) value).get(Server.VERSION_3);
+                conditionValue = ((Lists.Value) value).getWithProtocolVersion(Server.VERSION_3);
             else if (type.kind == CollectionType.Kind.SET)
-                conditionValue = ((Sets.Value) value).get(Server.VERSION_3);
+                conditionValue = ((Sets.Value) value).getWithProtocolVersion(Server.VERSION_3);
             else
-                conditionValue = ((Maps.Value) value).get(Server.VERSION_3);
+                conditionValue = ((Maps.Value) value).getWithProtocolVersion(Server.VERSION_3);
 
             return compareWithOperator(operator, type, conditionValue, cell.value());
         }
@@ -526,15 +513,9 @@ public class ColumnCondition
 
             switch (type.kind)
             {
-                case LIST:
-                    List<ByteBuffer> valueList = ((Lists.Value) value).elements;
-                    return listAppliesTo((ListType)type, iter, valueList, operator);
-                case SET:
-                    Set<ByteBuffer> valueSet = ((Sets.Value) value).elements;
-                    return setAppliesTo((SetType)type, iter, valueSet, operator);
-                case MAP:
-                    Map<ByteBuffer, ByteBuffer> valueMap = ((Maps.Value) value).map;
-                    return mapAppliesTo((MapType)type, iter, valueMap, operator);
+                case LIST: return listAppliesTo((ListType)type, iter, ((Lists.Value)value).elements, operator);
+                case SET: return setAppliesTo((SetType)type, iter, ((Sets.Value)value).elements, operator);
+                case MAP: return mapAppliesTo((MapType)type, iter, ((Maps.Value)value).map, operator);
             }
             throw new AssertionError();
         }
@@ -544,7 +525,7 @@ public class ColumnCondition
             while(iter.hasNext())
             {
                 if (!conditionIter.hasNext())
-                    return (operator == Operator.GT) || (operator == Operator.GTE) || (operator == Operator.NEQ);
+                    return operator.equals(Operator.GT) || operator.equals(Operator.GTE) || operator.equals(Operator.NEQ);
 
                 // for lists we use the cell value; for sets we use the cell name
                 ByteBuffer cellValue = isSet? iter.next().name().collectionElement() : iter.next().value();
@@ -554,7 +535,7 @@ public class ColumnCondition
             }
 
             if (conditionIter.hasNext())
-                return (operator == Operator.LT) || (operator == Operator.LTE) || (operator == Operator.NEQ);
+                return operator.equals(Operator.LT) || operator.equals(Operator.LTE) || operator.equals(Operator.NEQ);
 
             // they're equal
             return operator == Operator.EQ || operator == Operator.LTE || operator == Operator.GTE;
@@ -599,7 +580,7 @@ public class ColumnCondition
             while(iter.hasNext())
             {
                 if (!conditionIter.hasNext())
-                    return (operator == Operator.GT) || (operator == Operator.GTE) || (operator == Operator.NEQ);
+                    return operator.equals(Operator.GT) || operator.equals(Operator.GTE) || operator.equals(Operator.NEQ);
 
                 Map.Entry<ByteBuffer, ByteBuffer> conditionEntry = conditionIter.next();
                 Cell c = iter.next();
@@ -616,7 +597,7 @@ public class ColumnCondition
             }
 
             if (conditionIter.hasNext())
-                return (operator == Operator.LT) || (operator == Operator.LTE) || (operator == Operator.NEQ);
+                return operator.equals(Operator.LT) || operator.equals(Operator.LTE) || operator.equals(Operator.NEQ);
 
             // they're equal
             return operator == Operator.EQ || operator == Operator.LTE || operator == Operator.GTE;
@@ -626,14 +607,12 @@ public class ColumnCondition
     public static class CollectionInBound extends Bound
     {
         private final List<Term.Terminal> inValues;
-        private final QueryOptions options;
 
         private CollectionInBound(ColumnCondition condition, QueryOptions options) throws InvalidRequestException
         {
             super(condition.column, condition.operator);
             assert column.type instanceof CollectionType && condition.collectionElement == null;
-            assert condition.operator == Operator.IN;
-            this.options = options;
+            assert condition.operator.equals(Operator.IN);
             inValues = new ArrayList<>();
             if (condition.inValues == null)
             {
@@ -706,7 +685,7 @@ public class ColumnCondition
                         if (cell == null || !cell.isLive(now))
                             return true;
                     }
-                    else if (type.compare(value.get(Server.VERSION_3), cell.value()) == 0)
+                    else if (type.compare(((Term.CollectionTerminal)value).getWithProtocolVersion(Server.VERSION_3), cell.value()) == 0)
                     {
                         return true;
                     }
@@ -779,7 +758,7 @@ public class ColumnCondition
 
             if (collectionElement == null)
             {
-                if (operator == Operator.IN)
+                if (operator.equals(Operator.IN))
                 {
                     if (inValues == null)
                         return ColumnCondition.inCondition(receiver, inMarker.prepare(keyspace, receiver));
@@ -813,7 +792,7 @@ public class ColumnCondition
                 default:
                     throw new AssertionError();
             }
-            if (operator == Operator.IN)
+            if (operator.equals(Operator.IN))
             {
                 if (inValues == null)
                     return ColumnCondition.inCondition(receiver, collectionElement.prepare(keyspace, elementSpec), inMarker.prepare(keyspace, valueSpec));

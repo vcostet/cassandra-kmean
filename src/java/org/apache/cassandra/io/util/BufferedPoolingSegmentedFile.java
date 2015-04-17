@@ -19,7 +19,7 @@ package org.apache.cassandra.io.util;
 
 import java.io.File;
 
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.SSTableWriter;
 
 public class BufferedPoolingSegmentedFile extends PoolingSegmentedFile
 {

@@ -21,13 +21,18 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import org.apache.cassandra.auth.PasswordAuthenticator;
+import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -35,12 +40,18 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.SSTableLoader;
 import org.apache.cassandra.streaming.StreamState;
-import org.apache.cassandra.thrift.*;
+import org.apache.cassandra.thrift.AuthenticationRequest;
+import org.apache.cassandra.thrift.Cassandra;
+import org.apache.cassandra.thrift.CfDef;
+import org.apache.cassandra.thrift.KsDef;
+import org.apache.cassandra.thrift.TokenRange;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.mapreduce.RecordWriter;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.util.Progressable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public abstract class AbstractBulkRecordWriter<K, V> extends RecordWriter<K, V>
 implements org.apache.hadoop.mapred.RecordWriter<K, V>
@@ -74,6 +85,7 @@ implements org.apache.hadoop.mapred.RecordWriter<K, V>
 
     protected AbstractBulkRecordWriter(Configuration conf)
     {
+        Config.setClientMode(true);
         Config.setOutboundBindAny(true);
         this.conf = conf;
         DatabaseDescriptor.setStreamThroughputOutboundMegabitsPerSec(Integer.parseInt(conf.get(STREAM_THROTTLE_MBITS, "0")));
@@ -158,8 +170,8 @@ implements org.apache.hadoop.mapred.RecordWriter<K, V>
 
         public void init(String keyspace)
         {
+            Set<InetAddress> hosts = new HashSet<InetAddress>();
             String[] nodes = hostlist.split(",");
-            Set<InetAddress> hosts = new HashSet<InetAddress>(nodes.length);
             for (String node : nodes)
             {
                 try
@@ -184,8 +196,8 @@ implements org.apache.hadoop.mapred.RecordWriter<K, V>
                     if (username != null)
                     {
                         Map<String, String> creds = new HashMap<String, String>();
-                        creds.put(PasswordAuthenticator.USERNAME_KEY, username);
-                        creds.put(PasswordAuthenticator.PASSWORD_KEY, password);
+                        creds.put(IAuthenticator.USERNAME_KEY, username);
+                        creds.put(IAuthenticator.PASSWORD_KEY, password);
                         AuthenticationRequest authRequest = new AuthenticationRequest(creds);
                         client.login(authRequest);
                     }
@@ -209,7 +221,7 @@ implements org.apache.hadoop.mapred.RecordWriter<K, V>
                     {
                         Map<String, CFMetaData> cfs = new HashMap<>(ksDef.cf_defs.size());
                         for (CfDef cfDef : ksDef.cf_defs)
-                            cfs.put(cfDef.name, ThriftConversion.fromThrift(cfDef));
+                            cfs.put(cfDef.name, CFMetaData.fromThrift(cfDef));
                         knownCfs.put(ksDef.name, cfs);
                     }
                     break;

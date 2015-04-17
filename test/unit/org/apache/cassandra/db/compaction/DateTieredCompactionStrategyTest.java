@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.google.common.collect.Iterables;
@@ -29,14 +28,13 @@ import com.google.common.collect.Lists;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.io.sstable.SSTableReader;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.db.compaction.DateTieredCompactionStrategy.getBuckets;
@@ -49,17 +47,8 @@ import static org.junit.Assert.*;
 
 public class DateTieredCompactionStrategyTest extends SchemaLoader
 {
-    public static final String KEYSPACE1 = "DateTieredCompactionStrategyTest";
+    public static final String KEYSPACE1 = "Keyspace1";
     private static final String CF_STANDARD1 = "Standard1";
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1));
-    }
 
     @Test
     public void testOptionsValidation() throws ConfigurationException
@@ -299,7 +288,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         // create 2 sstables
         DecoratedKey key = Util.dk(String.valueOf("expired"));
         Mutation rm = new Mutation(KEYSPACE1, key.getKey());
-        rm.add(CF_STANDARD1, Util.cellname("column"), value, System.currentTimeMillis(), 5);
+        rm.add(CF_STANDARD1, Util.cellname("column"), value, System.currentTimeMillis(), 1);
         rm.apply();
         cfs.forceBlockingFlush();
         SSTableReader expiredSSTable = cfs.getSSTables().iterator().next();
@@ -321,12 +310,13 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
             dtcs.addSSTable(sstable);
         dtcs.startup();
         assertNull(dtcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000)));
-        Thread.sleep(7000);
+        Thread.sleep(2000);
         AbstractCompactionTask t = dtcs.getNextBackgroundTask((int) (System.currentTimeMillis()/1000));
         assertNotNull(t);
         assertEquals(1, Iterables.size(t.sstables));
         SSTableReader sstable = t.sstables.iterator().next();
         assertEquals(sstable, expiredSSTable);
+        cfs.getDataTracker().unmarkCompacting(cfs.getSSTables());
     }
 
 }

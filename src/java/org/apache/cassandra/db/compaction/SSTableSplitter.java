@@ -20,9 +20,7 @@ package org.apache.cassandra.db.compaction;
 import java.util.*;
 
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
-import org.apache.cassandra.db.compaction.writers.MaxSSTableSizeWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.*;
 
 public class SSTableSplitter {
 
@@ -73,9 +71,9 @@ public class SSTableSplitter {
         }
 
         @Override
-        public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Set<SSTableReader> allSSTables, Set<SSTableReader> nonExpiredSSTables)
+        protected boolean newSSTableSegmentThresholdReached(SSTableWriter writer)
         {
-            return new MaxSSTableSizeWriter(cfs, sstables, nonExpiredSSTables, sstableSizeInMB * 1024 * 1024, 0, true, compactionType);
+            return writer.getOnDiskFilePointer() > sstableSizeInMB * 1024L * 1024L;
         }
 
         @Override

@@ -25,29 +25,27 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.*;
 
-import org.apache.cassandra.transport.Server;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.auth.PasswordAuthenticator;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.Cell;
-import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.db.marshal.AbstractCompositeType.CompositeComponent;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.hadoop.ConfigHelper;
-import org.apache.cassandra.schema.LegacySchemaTables;
+import org.apache.cassandra.auth.IAuthenticator;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractCompositeType.CompositeComponent;
 import org.apache.cassandra.serializers.CollectionSerializer;
+import org.apache.cassandra.hadoop.*;
 import org.apache.cassandra.thrift.*;
-import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Hex;
+import org.apache.cassandra.utils.UUIDGen;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.mapreduce.InputFormat;
-import org.apache.hadoop.mapreduce.Job;
-import org.apache.hadoop.mapreduce.OutputFormat;
+import org.apache.hadoop.mapreduce.*;
 import org.apache.pig.*;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.*;
@@ -56,6 +54,8 @@ import org.apache.thrift.TDeserializer;
 import org.apache.thrift.TException;
 import org.apache.thrift.TSerializer;
 import org.apache.thrift.protocol.TBinaryProtocol;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A LoadStoreFunc for retrieving data from and storing data to Cassandra
@@ -267,7 +267,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
     public static Map<String, String> getQueryMap(String query) throws UnsupportedEncodingException 
     {
         String[] params = query.split("&");
-        Map<String, String> map = new HashMap<String, String>(params.length);
+        Map<String, String> map = new HashMap<String, String>();
         for (String param : params)
         {
             String[] keyValue = param.split("=");
@@ -438,7 +438,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         }
         // NOTE: using protocol v1 serialization format for collections so as to not break
         // compatibility. Not sure if that's the right thing.
-        return CollectionSerializer.pack(serialized, objects.size(), Server.VERSION_1);
+        return CollectionSerializer.pack(serialized, objects.size(), 1);
     }
 
     private ByteBuffer objToMapBB(List<Object> objects)
@@ -455,7 +455,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         } 
         // NOTE: using protocol v1 serialization format for collections so as to not break
         // compatibility. Not sure if that's the right thing.
-        return CollectionSerializer.pack(serialized, objects.size(), Server.VERSION_1);
+        return CollectionSerializer.pack(serialized, objects.size(), 1);
     }
 
     private ByteBuffer objToCompositeBB(List<Object> objects)
@@ -505,8 +505,8 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                 if (username != null && password != null)
                 {
                     Map<String, String> credentials = new HashMap<String, String>(2);
-                    credentials.put(PasswordAuthenticator.USERNAME_KEY, username);
-                    credentials.put(PasswordAuthenticator.PASSWORD_KEY, password);
+                    credentials.put(IAuthenticator.USERNAME_KEY, username);
+                    credentials.put(IAuthenticator.PASSWORD_KEY, password);
 
                     try
                     {
@@ -516,6 +516,10 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                     {
                         logger.error("Authentication exception: invalid username and/or password");
                         throw new IOException(e);
+                    }
+                    catch (AuthorizationException e)
+                    {
+                        throw new AssertionError(e); // never actually throws AuthorizationException.
                     }
                 }
 
@@ -529,7 +533,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                     properties.setProperty(signature, sb.toString());
                 }
                 else
-                    throw new IOException(String.format("Table '%s' not found in keyspace '%s'",
+                    throw new IOException(String.format("Column family '%s' not found in keyspace '%s'",
                                                              column_family,
                                                              keyspace));
             }
@@ -586,15 +590,20 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
                    IOException
     {
         // get CF meta data
-        String query = String.format("SELECT type, comparator, subcomparator, default_validator, key_validator, key_aliases " +
-                                     "FROM %s.%s " +
-                                     "WHERE keyspace_name = '%s' AND columnfamily_name = '%s'",
-                                     SystemKeyspace.NAME,
-                                     LegacySchemaTables.COLUMNFAMILIES,
-                                     keyspace,
-                                     column_family);
+        String query = "SELECT type," +
+                       "       comparator," +
+                       "       subcomparator," +
+                       "       default_validator," +
+                       "       key_validator," +
+                       "       key_aliases " +
+                       "FROM system.schema_columnfamilies " +
+                       "WHERE keyspace_name = '%s' " +
+                       "  AND columnfamily_name = '%s' ";
 
-        CqlResult result = client.execute_cql3_query(ByteBufferUtil.bytes(query), Compression.NONE, ConsistencyLevel.ONE);
+        CqlResult result = client.execute_cql3_query(
+                                ByteBufferUtil.bytes(String.format(query, keyspace, column_family)),
+                                Compression.NONE,
+                                ConsistencyLevel.ONE);
 
         if (result == null || result.rows == null || result.rows.isEmpty())
             return null;
@@ -653,15 +662,18 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
             ConfigurationException,
             NotFoundException
     {
-        String query = String.format("SELECT column_name, validator, index_type, type " +
-                                     "FROM %s.%s " +
-                                     "WHERE keyspace_name = '%s' AND columnfamily_name = '%s'",
-                                     SystemKeyspace.NAME,
-                                     LegacySchemaTables.COLUMNS,
-                                     keyspace,
-                                     column_family);
+        String query = "SELECT column_name, " +
+                       "       validator, " +
+                       "       index_type, " +
+                       "       type " +
+                       "FROM system.schema_columns " +
+                       "WHERE keyspace_name = '%s' " +
+                       "  AND columnfamily_name = '%s'";
 
-        CqlResult result = client.execute_cql3_query(ByteBufferUtil.bytes(query), Compression.NONE, ConsistencyLevel.ONE);
+        CqlResult result = client.execute_cql3_query(
+                                   ByteBufferUtil.bytes(String.format(query, keyspace, column_family)),
+                                   Compression.NONE,
+                                   ConsistencyLevel.ONE);
 
         List<CqlRow> rows = result.rows;
         List<ColumnDef> columnDefs = new ArrayList<ColumnDef>();
@@ -770,7 +782,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         for (CfDef cfDef : ksDef.cf_defs)
         {
             if (cfDef.name.equalsIgnoreCase(cf))
-                return ThriftConversion.fromThrift(cfDef);
+                return CFMetaData.fromThrift(cfDef);
         }
         return null;
     }

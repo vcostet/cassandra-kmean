@@ -26,8 +26,6 @@ import com.google.common.collect.Sets;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.io.sstable.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -44,14 +42,11 @@ public class Scrubber implements Closeable
 
     private final CompactionController controller;
     private final boolean isCommutative;
-    private final boolean isIndex;
-    private final boolean checkData;
     private final int expectedBloomFilterSize;
 
     private final RandomAccessReader dataFile;
     private final RandomAccessReader indexFile;
     private final ScrubInfo scrubInfo;
-    private final RowIndexEntry.IndexSerializer rowIndexEntrySerializer;
 
     private final boolean isOffline;
 
@@ -85,7 +80,6 @@ public class Scrubber implements Closeable
         this.outputHandler = outputHandler;
         this.skipCorrupted = skipCorrupted;
         this.isOffline = isOffline;
-        this.rowIndexEntrySerializer = sstable.descriptor.version.getSSTableFormat().getIndexSerializer(sstable.metadata);
 
         List<SSTableReader> toScrub = Collections.singletonList(sstable);
 
@@ -99,8 +93,6 @@ public class Scrubber implements Closeable
                         ? new ScrubController(cfs)
                         : new CompactionController(cfs, Collections.singleton(sstable), CompactionManager.getDefaultGcBefore(cfs));
         this.isCommutative = cfs.metadata.isCounter();
-        this.isIndex = cfs.isIndex();
-        this.checkData = !this.isIndex; //LocalByPartitionerType does not support validation
         this.expectedBloomFilterSize = Math.max(cfs.metadata.getMinIndexInterval(), (int)(SSTableReader.getApproximateKeyCount(toScrub)));
 
         // loop through each row, deserializing to check for damage.
@@ -124,7 +116,7 @@ public class Scrubber implements Closeable
             ByteBuffer nextIndexKey = ByteBufferUtil.readWithShortLength(indexFile);
             {
                 // throw away variable so we don't have a side effect in the assert
-                long firstRowPositionFromIndex = rowIndexEntrySerializer.deserialize(indexFile, sstable.descriptor.version).position;
+                long firstRowPositionFromIndex = sstable.metadata.comparator.rowIndexEntrySerializer().deserialize(indexFile, sstable.descriptor.version).position;
                 assert firstRowPositionFromIndex == 0 : firstRowPositionFromIndex;
             }
 
@@ -140,6 +132,7 @@ public class Scrubber implements Closeable
                 outputHandler.debug("Reading row at " + rowStart);
 
                 DecoratedKey key = null;
+                long dataSize = -1;
                 try
                 {
                     key = sstable.partitioner.decorateKey(ByteBufferUtil.readWithShortLength(dataFile));
@@ -157,7 +150,7 @@ public class Scrubber implements Closeable
                     nextIndexKey = indexFile.isEOF() ? null : ByteBufferUtil.readWithShortLength(indexFile);
                     nextRowPositionFromIndex = indexFile.isEOF()
                                              ? dataFile.length()
-                                             : rowIndexEntrySerializer.deserialize(indexFile, sstable.descriptor.version).position;
+                                             : sstable.metadata.comparator.rowIndexEntrySerializer().deserialize(indexFile, sstable.descriptor.version).position;
                 }
                 catch (Throwable th)
                 {
@@ -173,7 +166,7 @@ public class Scrubber implements Closeable
                                         : rowStart + 2 + currentIndexKey.remaining();
                 long dataSizeFromIndex = nextRowPositionFromIndex - dataStartFromIndex;
 
-                long dataSize = dataSizeFromIndex;
+                dataSize = dataSizeFromIndex;
                 // avoid an NPE if key is null
                 String keyName = key == null ? "(unreadable key)" : ByteBufferUtil.bytesToHex(key.getKey());
                 outputHandler.debug(String.format("row %s is %s bytes", keyName, dataSize));
@@ -187,7 +180,7 @@ public class Scrubber implements Closeable
                     if (dataSize > dataFile.length())
                         throw new IOError(new IOException("Impossible row size " + dataSize));
 
-                    SSTableIdentityIterator atoms = new SSTableIdentityIterator(sstable, dataFile, key, checkData);
+                    SSTableIdentityIterator atoms = new SSTableIdentityIterator(sstable, dataFile, key, dataSize, true);
                     if (prevKey != null && prevKey.compareTo(key) > 0)
                     {
                         saveOutOfOrderRow(prevKey, key, atoms);
@@ -216,7 +209,7 @@ public class Scrubber implements Closeable
                         key = sstable.partitioner.decorateKey(currentIndexKey);
                         try
                         {
-                            SSTableIdentityIterator atoms = new SSTableIdentityIterator(sstable, dataFile, key, checkData);
+                            SSTableIdentityIterator atoms = new SSTableIdentityIterator(sstable, dataFile, key, dataSize, true);
                             if (prevKey != null && prevKey.compareTo(key) > 0)
                             {
                                 saveOutOfOrderRow(prevKey, key, atoms);
@@ -233,7 +226,7 @@ public class Scrubber implements Closeable
                         catch (Throwable th2)
                         {
                             throwIfFatal(th2);
-                            throwIfCannotContinue(key, th2);
+                            throwIfCommutative(key, th2);
 
                             outputHandler.warn("Retry failed too. Skipping to next row (retry's stacktrace follows)", th2);
                             dataFile.seek(nextRowPositionFromIndex);
@@ -242,7 +235,7 @@ public class Scrubber implements Closeable
                     }
                     else
                     {
-                        throwIfCannotContinue(key, th);
+                        throwIfCommutative(key, th);
 
                         outputHandler.warn("Row starting at position " + dataStart + " is unreadable; skipping to next");
                         if (currentIndexKey != null)
@@ -328,15 +321,8 @@ public class Scrubber implements Closeable
             throw (Error) th;
     }
 
-    private void throwIfCannotContinue(DecoratedKey key, Throwable th)
+    private void throwIfCommutative(DecoratedKey key, Throwable th)
     {
-        if (isIndex)
-        {
-            outputHandler.warn(String.format("An error occurred while scrubbing the row with key '%s' for an index table. " +
-                                             "Scrubbing will abort for this table and the index will be rebuilt.", key));
-            throw new IOError(th);
-        }
-
         if (isCommutative && !skipCorrupted)
         {
             outputHandler.warn(String.format("An error occurred while scrubbing the row with key '%s'.  Skipping corrupt " +

@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.BytesSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -264,18 +263,6 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
 
         bb.rewind();
         return bb;
-    }
-
-    @Override
-    public Term fromJSONObject(Object parsed)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public String toJSONString(ByteBuffer buffer, int protocolVersion)
-    {
-        throw new UnsupportedOperationException();
     }
 
     @Override

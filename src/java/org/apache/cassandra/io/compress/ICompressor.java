@@ -18,46 +18,31 @@
 package org.apache.cassandra.io.compress;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Set;
 
 public interface ICompressor
 {
     public int initialCompressedBufferLength(int chunkLength);
 
+    public int compress(byte[] input, int inputOffset, int inputLength, WrappedArray output, int outputOffset) throws IOException;
+
     public int uncompress(byte[] input, int inputOffset, int inputLength, byte[] output, int outputOffset) throws IOException;
-
-    /**
-     * Compression for ByteBuffers
-     */
-    public int compress(ByteBuffer input, WrappedByteBuffer output) throws IOException;
-
-    /**
-     * Decompression for DirectByteBuffers
-     */
-    public int uncompress(ByteBuffer input, ByteBuffer output) throws IOException;
-
-    /**
-     * Notifies user if this compressor will wants/requires a direct byte buffers to
-     * decompress direct byteBuffers
-     */
-    public boolean useDirectOutputByteBuffers();
 
     public Set<String> supportedOptions();
 
     /**
-     * A simple wrapped Bytebuffer.
-     * Not all implementations allow us to know the maximum size after
-     * compression. This makes it hard to size the output buffer for compression
-     * (and we want to reuse the buffer).  Instead we use this wrapped ByteBuffer
-     * so that compress(...) can have the liberty to resize the underlying array if
-     * necessary.
+     * A simple wrapper of a byte array.
+     * Not all implementation allows to know what is the maximum size after
+     * compression. This make it hard to size the ouput buffer for compress
+     * (and we want to reuse the buffer).  Instead we use this wrapped buffer
+     * so that compress can have the liberty to resize underlying array if
+     * need be.
      */
-    public static class WrappedByteBuffer
+    public static class WrappedArray
     {
-        public ByteBuffer buffer;
+        public byte[] buffer;
 
-        public WrappedByteBuffer(ByteBuffer buffer)
+        public WrappedArray(byte[] buffer)
         {
             this.buffer = buffer;
         }

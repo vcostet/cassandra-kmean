@@ -29,6 +29,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
 public class BatchTests
 {
@@ -119,18 +120,6 @@ public class BatchTests
     public void testCounterInLoggedBatch()
     {
         sendBatch(BatchStatement.Type.LOGGED, true, false);
-    }
-
-    @Test(expected = InvalidQueryException.class)
-    public void testOversizedBatch()
-    {
-        int SIZE_FOR_FAILURE = 2500;
-        BatchStatement b = new BatchStatement(BatchStatement.Type.UNLOGGED);
-        for (int i = 0; i < SIZE_FOR_FAILURE; i++)
-        {
-            b.add(noncounter.bind(i, "foobar"));
-        }
-        session.execute(b);
     }
 
 

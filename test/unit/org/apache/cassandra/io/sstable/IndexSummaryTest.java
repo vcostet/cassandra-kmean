@@ -30,7 +30,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -133,10 +132,6 @@ public class IndexSummaryTest
                 builder.maybeAddEntry(list.get(i), i);
             IndexSummary summary = builder.build(DatabaseDescriptor.getPartitioner());
             return Pair.create(list, summary);
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
         }
     }
 

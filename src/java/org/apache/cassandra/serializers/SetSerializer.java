@@ -22,6 +22,8 @@ import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.utils.ByteBufferUtil;
+
 public class SetSerializer<T> extends CollectionSerializer<Set<T>>
 {
     // interning instances
@@ -96,19 +98,6 @@ public class SetSerializer<T> extends CollectionSerializer<Set<T>>
         {
             throw new MarshalException("Not enough bytes to read a list");
         }
-    }
-
-    /**
-     * Deserializes a serialized set and returns a set of unserialized (ByteBuffer) elements.
-     */
-    public Set<ByteBuffer> deserializeToByteBufferCollection(ByteBuffer bytes, int version)
-    {
-        ByteBuffer input = bytes.duplicate();
-        int n = readCollectionSize(input, version);
-        Set<ByteBuffer> s = new LinkedHashSet<>(n);
-        for (int i = 0; i < n; i++)
-            s.add(readValue(input, version));
-        return s;
     }
 
     public String toString(Set<T> value)

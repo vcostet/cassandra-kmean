@@ -50,8 +50,8 @@ public class BatchMessage extends Message.Request
 
             byte type = body.readByte();
             int n = body.readUnsignedShort();
-            List<Object> queryOrIds = new ArrayList<>(n);
-            List<List<ByteBuffer>> variables = new ArrayList<>(n);
+            List<Object> queryOrIds = new ArrayList<Object>(n);
+            List<List<ByteBuffer>> variables = new ArrayList<List<ByteBuffer>>(n);
             for (int i = 0; i < n; i++)
             {
                 byte kind = body.readByte();
@@ -74,7 +74,7 @@ public class BatchMessage extends Message.Request
         {
             int queries = msg.queryOrIdList.size();
 
-            dest.writeByte(fromType(msg.batchType));
+            dest.writeByte(fromType(msg.type));
             dest.writeShort(queries);
 
             for (int i = 0; i < queries; i++)
@@ -138,7 +138,7 @@ public class BatchMessage extends Message.Request
         }
     };
 
-    public final BatchStatement.Type batchType;
+    public final BatchStatement.Type type;
     public final List<Object> queryOrIdList;
     public final List<List<ByteBuffer>> values;
     public final QueryOptions options;
@@ -146,7 +146,7 @@ public class BatchMessage extends Message.Request
     public BatchMessage(BatchStatement.Type type, List<Object> queryOrIdList, List<List<ByteBuffer>> values, QueryOptions options)
     {
         super(Message.Type.BATCH);
-        this.batchType = type;
+        this.type = type;
         this.queryOrIdList = queryOrIdList;
         this.values = values;
         this.options = options;
@@ -165,9 +165,9 @@ public class BatchMessage extends Message.Request
 
             if (state.traceNextQuery())
             {
-                state.createTracingSession(connection);
+                state.createTracingSession();
                 // TODO we don't have [typed] access to CQL bind variables here.  CASSANDRA-4560 is open to add support.
-                Tracing.instance.begin("Execute batch of CQL3 queries", state.getClientAddress(), Collections.<String, String>emptyMap());
+                Tracing.instance.begin("Execute batch of CQL3 queries", Collections.<String, String>emptyMap());
             }
 
             QueryHandler handler = ClientState.getCQLQueryHandler();
@@ -211,8 +211,8 @@ public class BatchMessage extends Message.Request
 
             // Note: It's ok at this point to pass a bogus value for the number of bound terms in the BatchState ctor
             // (and no value would be really correct, so we prefer passing a clearly wrong one).
-            BatchStatement batch = new BatchStatement(-1, batchType, statements, Attributes.none());
-            Message.Response response = handler.processBatch(batch, state, batchOptions, getCustomPayload());
+            BatchStatement batch = new BatchStatement(-1, type, statements, Attributes.none());
+            Message.Response response = handler.processBatch(batch, state, batchOptions);
 
             if (tracingId != null)
                 response.setTracingId(tracingId);

@@ -19,16 +19,8 @@ package org.apache.cassandra.metrics;
 
 import java.util.concurrent.ThreadPoolExecutor;
 
-import com.codahale.metrics.Counter;
-import com.codahale.metrics.Gauge;
-import com.codahale.metrics.JmxReporter;
-
-import javax.management.JMX;
-import javax.management.MBeanServerConnection;
-import javax.management.ObjectName;
-
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
-
+import com.yammer.metrics.Metrics;
+import com.yammer.metrics.core.*;
 
 /**
  * Metrics for {@link ThreadPoolExecutor}.
@@ -64,32 +56,32 @@ public class ThreadPoolMetrics
     {
         this.factory = new ThreadPoolMetricNameFactory("ThreadPools", path, poolName);
 
-        activeTasks = Metrics.register(factory.createMetricName("ActiveTasks"), new Gauge<Integer>()
+        activeTasks = Metrics.newGauge(factory.createMetricName("ActiveTasks"), new Gauge<Integer>()
         {
-            public Integer getValue()
+            public Integer value()
             {
                 return executor.getActiveCount();
             }
         });
-        totalBlocked = Metrics.counter(factory.createMetricName("TotalBlockedTasks"));
-        currentBlocked = Metrics.counter(factory.createMetricName("CurrentlyBlockedTasks"));
-        completedTasks = Metrics.register(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
+        totalBlocked = Metrics.newCounter(factory.createMetricName("TotalBlockedTasks"));
+        currentBlocked = Metrics.newCounter(factory.createMetricName("CurrentlyBlockedTasks"));
+        completedTasks = Metrics.newGauge(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
         {
-            public Long getValue()
+            public Long value()
             {
                 return executor.getCompletedTaskCount();
             }
         });
-        pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), new Gauge<Long>()
+        pendingTasks = Metrics.newGauge(factory.createMetricName("PendingTasks"), new Gauge<Long>()
         {
-            public Long getValue()
+            public Long value()
             {
                 return executor.getTaskCount() - executor.getCompletedTaskCount();
             }
         });
-        maxPoolSize = Metrics.register(factory.createMetricName("MaxPoolSize"), new Gauge<Integer>()
+        maxPoolSize =  Metrics.newGauge(factory.createMetricName("MaxPoolSize"), new Gauge<Integer>()
         {
-            public Integer getValue()
+            public Integer value()
             {
                 return executor.getMaximumPoolSize();
             }
@@ -98,41 +90,11 @@ public class ThreadPoolMetrics
 
     public void release()
     {
-        Metrics.remove(factory.createMetricName("ActiveTasks"));
-        Metrics.remove(factory.createMetricName("PendingTasks"));
-        Metrics.remove(factory.createMetricName("CompletedTasks"));
-        Metrics.remove(factory.createMetricName("TotalBlockedTasks"));
-        Metrics.remove(factory.createMetricName("CurrentlyBlockedTasks"));
-        Metrics.remove(factory.createMetricName("MaxPoolSize"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("ActiveTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("PendingTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("CompletedTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("TotalBlockedTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("CurrentlyBlockedTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("MaxPoolSize"));
     }
-
-
-    public static Object getJmxMetric(MBeanServerConnection mbeanServerConn, String jmxPath, String poolName, String metricName)
-    {
-        String name = String.format("org.apache.cassandra.metrics:type=ThreadPools,path=%s,scope=%s,name=%s", jmxPath, poolName, metricName);
-
-        try
-        {
-            ObjectName oName = new ObjectName(name);
-
-            switch (metricName)
-            {
-                case "ActiveTasks":
-                case "PendingTasks":
-                case "CompletedTasks":
-                    return JMX.newMBeanProxy(mbeanServerConn, oName, JmxReporter.JmxGaugeMBean.class).getValue();
-                case "TotalBlockedTasks":
-                case "CurrentlyBlockedTasks":
-                    return JMX.newMBeanProxy(mbeanServerConn, oName, JmxReporter.JmxCounterMBean.class).getCount();
-                default:
-                    throw new AssertionError("Unknown metric name " + metricName);
-            }
-
-        }
-        catch (Throwable e)
-        {
-            throw new RuntimeException("Error reading: " + name, e);
-        }
-    }
-
 }

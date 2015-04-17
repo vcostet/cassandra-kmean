@@ -43,7 +43,7 @@ public class HeapPool extends MemtablePool
         return new Allocator(this);
     }
 
-    public static class Allocator extends MemtableBufferAllocator
+    public class Allocator extends MemtableBufferAllocator
     {
         Allocator(HeapPool pool)
         {

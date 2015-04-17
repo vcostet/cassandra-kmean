@@ -24,7 +24,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +34,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
@@ -161,7 +161,7 @@ public abstract class AbstractCompactionStrategy
      *
      * Is responsible for marking its sstables as compaction-pending.
      */
-    public abstract Collection<AbstractCompactionTask> getMaximalTask(final int gcBefore, boolean splitOutput);
+    public abstract Collection<AbstractCompactionTask> getMaximalTask(final int gcBefore);
 
     /**
      * @param sstables SSTables to compact. Must be marked as compacting.
@@ -394,7 +394,7 @@ public abstract class AbstractCompactionStrategy
             long keys = sstable.estimatedKeys();
             Set<Range<Token>> ranges = new HashSet<Range<Token>>(overlaps.size());
             for (SSTableReader overlap : overlaps)
-                ranges.add(new Range<>(overlap.first.getToken(), overlap.last.getToken()));
+                ranges.add(new Range<Token>(overlap.first.getToken(), overlap.last.getToken(), overlap.partitioner));
             long remainingKeys = keys - sstable.estimatedKeysForRanges(ranges);
             // next, calculate what percentage of columns we have within those keys
             long columns = sstable.getEstimatedColumnCount().mean() * remainingKeys;
@@ -469,36 +469,5 @@ public abstract class AbstractCompactionStrategy
         String optionValue = options.get(COMPACTION_ENABLED);
 
         return optionValue == null || Boolean.parseBoolean(optionValue);
-    }
-
-
-    /**
-     * Method for grouping similar SSTables together, This will be used by
-     * anti-compaction to determine which SSTables should be anitcompacted
-     * as a group. If a given compaction strategy creates sstables which
-     * cannot be merged due to some constraint it must override this method.
-     */
-    public Collection<Collection<SSTableReader>> groupSSTablesForAntiCompaction(Collection<SSTableReader> sstablesToGroup)
-    {
-        int groupSize = 2;
-        List<SSTableReader> sortedSSTablesToGroup = new ArrayList<>(sstablesToGroup);
-        Collections.sort(sortedSSTablesToGroup, SSTableReader.sstableComparator);
-
-        Collection<Collection<SSTableReader>> groupedSSTables = new ArrayList<>();
-        Collection<SSTableReader> currGroup = new ArrayList<>();
-
-        for (SSTableReader sstable : sortedSSTablesToGroup)
-        {
-            currGroup.add(sstable);
-            if (currGroup.size() == groupSize)
-            {
-                groupedSSTables.add(currGroup);
-                currGroup = new ArrayList<>();
-            }
-        }
-
-        if (currGroup.size() != 0)
-            groupedSSTables.add(currGroup);
-        return groupedSSTables;
     }
 }

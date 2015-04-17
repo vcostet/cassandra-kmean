@@ -23,7 +23,7 @@ import java.io.IOException;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.composites.Composite;
-import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.Descriptor;
 
 /**
  * Helper class to deserialize OnDiskAtom efficiently.
@@ -40,13 +40,13 @@ public class AtomDeserializer
     private final DataInput in;
     private final ColumnSerializer.Flag flag;
     private final int expireBefore;
-    private final Version version;
+    private final Descriptor.Version version;
 
     // The "flag" for the next name (which correspond to the "masks" in ColumnSerializer) if it has been
     // read already, Integer.MIN_VALUE otherwise;
     private int nextFlags = Integer.MIN_VALUE;
 
-    public AtomDeserializer(CellNameType type, DataInput in, ColumnSerializer.Flag flag, int expireBefore, Version version)
+    public AtomDeserializer(CellNameType type, DataInput in, ColumnSerializer.Flag flag, int expireBefore, Descriptor.Version version)
     {
         this.type = type;
         this.nameDeserializer = type.newDeserializer(in);

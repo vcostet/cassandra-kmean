@@ -25,8 +25,6 @@ import java.util.*;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -39,21 +37,9 @@ public class SSTableUtils
     public static String KEYSPACENAME = "Keyspace1";
     public static String CFNAME = "Standard1";
 
-    public SSTableUtils(String ksname, String cfname)
-    {
-        KEYSPACENAME = ksname;
-        CFNAME = cfname;
-    }
-
-    /**/
     public static ColumnFamily createCF(long mfda, int ldt, Cell... cols)
     {
-        return createCF(KEYSPACENAME, CFNAME, mfda, ldt, cols);
-    }
-
-    public static ColumnFamily createCF(String ksname, String cfname, long mfda, int ldt, Cell... cols)
-    {
-        ColumnFamily cf = ArrayBackedSortedColumns.factory.create(ksname, cfname);
+        ColumnFamily cf = ArrayBackedSortedColumns.factory.create(KEYSPACENAME, CFNAME);
         cf.delete(new DeletionInfo(mfda, ldt));
         for (Cell col : cols)
             cf.addColumn(col);
@@ -71,10 +57,10 @@ public class SSTableUtils
         if(!tempdir.delete() || !tempdir.mkdir())
             throw new IOException("Temporary directory creation failed.");
         tempdir.deleteOnExit();
-        File cfDir = new File(tempdir, keyspaceName + File.separator + cfname);
-        cfDir.mkdirs();
-        cfDir.deleteOnExit();
-        File datafile = new File(new Descriptor(cfDir, keyspaceName, cfname, generation, Descriptor.Type.FINAL).filenameFor("Data.db"));
+        File keyspaceDir = new File(tempdir, keyspaceName);
+        keyspaceDir.mkdir();
+        keyspaceDir.deleteOnExit();
+        File datafile = new File(new Descriptor(keyspaceDir, keyspaceName, cfname, generation, Descriptor.Type.FINAL).filenameFor("Data.db"));
         if (!datafile.createNewFile())
             throw new IOException("unable to create file " + datafile);
         datafile.deleteOnExit();
@@ -213,7 +199,7 @@ public class SSTableUtils
         public SSTableReader write(int expectedSize, Appender appender) throws IOException
         {
             File datafile = (dest == null) ? tempSSTableFile(ksname, cfname, generation) : new File(dest.filenameFor(Component.DATA));
-            SSTableWriter writer = SSTableWriter.create(Descriptor.fromFilename(datafile.getAbsolutePath()), expectedSize, ActiveRepairService.UNREPAIRED_SSTABLE, 0);
+            SSTableWriter writer = new SSTableWriter(datafile.getAbsolutePath(), expectedSize, ActiveRepairService.UNREPAIRED_SSTABLE);
             while (appender.append(writer)) { /* pass */ }
             SSTableReader reader = writer.closeAndOpenReader();
             // mark all components for removal

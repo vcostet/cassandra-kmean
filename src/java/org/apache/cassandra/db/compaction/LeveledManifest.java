@@ -28,17 +28,18 @@ import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.RowPosition;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.utils.Pair;
 
 public class LeveledManifest
@@ -254,7 +255,8 @@ public class LeveledManifest
         return builder.toString();
     }
 
-    public static long maxBytesForLevel(int level, long maxSSTableSizeInBytes)
+    @VisibleForTesting
+    long maxBytesForLevel(int level)
     {
         if (level == 0)
             return 4L * maxSSTableSizeInBytes;
@@ -270,18 +272,6 @@ public class LeveledManifest
      */
     public synchronized CompactionCandidate getCompactionCandidates()
     {
-        // during bootstrap we only do size tiering in L0 to make sure
-        // the streamed files can be placed in their original levels
-        if (StorageService.instance.isBootstrapMode())
-        {
-            List<SSTableReader> mostInteresting = getSSTablesForSTCS(getLevel(0));
-            if (!mostInteresting.isEmpty())
-            {
-                logger.info("Bootstrapping - doing STCS in L0");
-                return new CompactionCandidate(mostInteresting, 0, Long.MAX_VALUE);
-            }
-            return null;
-        }
         // LevelDB gives each level a score of how much data it contains vs its ideal amount, and
         // compacts the level with the highest score. But this falls apart spectacularly once you
         // get behind.  Consider this set of levels:
@@ -317,7 +307,7 @@ public class LeveledManifest
             // we want to calculate score excluding compacting ones
             Set<SSTableReader> sstablesInLevel = Sets.newHashSet(sstables);
             Set<SSTableReader> remaining = Sets.difference(sstablesInLevel, cfs.getDataTracker().getCompacting());
-            double score = (double) SSTableReader.getTotalBytes(remaining) / (double)maxBytesForLevel(i, maxSSTableSizeInBytes);
+            double score = (double) SSTableReader.getTotalBytes(remaining) / (double)maxBytesForLevel(i);
             logger.debug("Compaction score for level {} is {}", i, score);
 
             if (score > 1.001)
@@ -511,7 +501,7 @@ public class LeveledManifest
     private static Set<SSTableReader> overlapping(Token start, Token end, Iterable<SSTableReader> sstables)
     {
         assert start.compareTo(end) <= 0;
-        Set<SSTableReader> overlapped = new HashSet<>();
+        Set<SSTableReader> overlapped = new HashSet<SSTableReader>();
         Bounds<Token> promotedBounds = new Bounds<Token>(start, end);
         for (SSTableReader candidate : sstables)
         {
@@ -569,8 +559,8 @@ public class LeveledManifest
             // Note that we ignore suspect-ness of L1 sstables here, since if an L1 sstable is suspect we're
             // basically screwed, since we expect all or most L0 sstables to overlap with each L1 sstable.
             // So if an L1 sstable is suspect we can't do much besides try anyway and hope for the best.
-            Set<SSTableReader> candidates = new HashSet<>();
-            Set<SSTableReader> remaining = new HashSet<>();
+            Set<SSTableReader> candidates = new HashSet<SSTableReader>();
+            Set<SSTableReader> remaining = new HashSet<SSTableReader>();
             Iterables.addAll(remaining, Iterables.filter(getLevel(0), Predicates.not(suspectP)));
             for (SSTableReader sstable : ageSortedSSTables(remaining))
             {
@@ -658,7 +648,7 @@ public class LeveledManifest
 
     private List<SSTableReader> ageSortedSSTables(Collection<SSTableReader> candidates)
     {
-        List<SSTableReader> ageSortedCandidates = new ArrayList<>(candidates);
+        List<SSTableReader> ageSortedCandidates = new ArrayList<SSTableReader>(candidates);
         Collections.sort(ageSortedCandidates, SSTableReader.maxTimestampComparator);
         return ageSortedCandidates;
     }
@@ -698,7 +688,7 @@ public class LeveledManifest
         {
             List<SSTableReader> sstables = getLevel(i);
             // If there is 1 byte over TBL - (MBL * 1.001), there is still a task left, so we need to round up.
-            estimated[i] = (long)Math.ceil((double)Math.max(0L, SSTableReader.getTotalBytes(sstables) - (long)(maxBytesForLevel(i, maxSSTableSizeInBytes) * 1.001)) / (double)maxSSTableSizeInBytes);
+            estimated[i] = (long)Math.ceil((double)Math.max(0L, SSTableReader.getTotalBytes(sstables) - (long)(maxBytesForLevel(i) * 1.001)) / (double)maxSSTableSizeInBytes);
             tasks += estimated[i];
         }
 
@@ -729,16 +719,6 @@ public class LeveledManifest
         }
         return newLevel;
 
-    }
-
-    public Iterable<SSTableReader> getAllSSTables()
-    {
-        Set<SSTableReader> sstables = new HashSet<>();
-        for (List<SSTableReader> generation : generations)
-        {
-            sstables.addAll(generation);
-        }
-        return sstables;
     }
 
     public static class CompactionCandidate

@@ -24,12 +24,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-import com.google.common.base.Function;
-
-import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.streaming.ProgressInfo;
@@ -53,11 +49,11 @@ public class CompressedStreamWriter extends StreamWriter
     }
 
     @Override
-    public void write(DataOutputStreamPlus out) throws IOException
+    public void write(WritableByteChannel channel) throws IOException
     {
         long totalSize = totalSize();
         RandomAccessReader file = sstable.openDataReader();
-        final FileChannel fc = file.getChannel();
+        FileChannel fc = file.getChannel();
 
         long progress = 0L;
         // calculate chunks to transfer. we want to send continuous chunks altogether.
@@ -65,7 +61,7 @@ public class CompressedStreamWriter extends StreamWriter
         try
         {
             // stream each of the required sections of the file
-            for (final Pair<Long, Long> section : sections)
+            for (Pair<Long, Long> section : sections)
             {
                 // length of the section to stream
                 long length = section.right - section.left;
@@ -73,23 +69,9 @@ public class CompressedStreamWriter extends StreamWriter
                 long bytesTransferred = 0;
                 while (bytesTransferred < length)
                 {
-                    final long bytesTransferredFinal = bytesTransferred;
-                    final int toTransfer = (int) Math.min(CHUNK_SIZE, length - bytesTransferred);
+                    int toTransfer = (int) Math.min(CHUNK_SIZE, length - bytesTransferred);
                     limiter.acquire(toTransfer);
-                    long lastWrite = out.applyToChannel( new Function<WritableByteChannel, Long>()
-                    {
-                        public Long apply(WritableByteChannel wbc)
-                        {
-                            try
-                            {
-                                return fc.transferTo(section.left + bytesTransferredFinal, toTransfer, wbc);
-                            }
-                            catch (IOException e)
-                            {
-                                throw new FSWriteError(e, sstable.getFilename());
-                            }
-                        }
-                    });
+                    long lastWrite = fc.transferTo(section.left + bytesTransferred, toTransfer, channel);
                     bytesTransferred += lastWrite;
                     progress += lastWrite;
                     session.progress(sstable.descriptor, ProgressInfo.Direction.OUT, progress, totalSize);

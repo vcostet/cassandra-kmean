@@ -19,13 +19,13 @@
 package org.apache.cassandra.tools;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.cli.*;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
@@ -48,13 +48,13 @@ public class StandaloneSplitter
     private static final String NO_SNAPSHOT_OPTION = "no-snapshot";
     private static final String SIZE_OPTION = "size";
 
-    public static void main(String args[])
+    public static void main(String args[]) throws IOException
     {
         Options options = Options.parseArgs(args);
         try
         {
             // load keyspace descriptions.
-            Schema.instance.loadFromDisk(false);
+            DatabaseDescriptor.loadSchemas(false);
 
             String ksName = null;
             String cfName = null;
@@ -82,7 +82,7 @@ public class StandaloneSplitter
                 if (cfName == null)
                     cfName = desc.cfname;
                 else if (!cfName.equals(desc.cfname))
-                    throw new IllegalArgumentException("All sstables must be part of the same table");
+                    throw new IllegalArgumentException("All sstables must be part of the same column family");
 
                 Set<Component> components = new HashSet<Component>(Arrays.asList(new Component[]{
                     Component.DATA,
@@ -112,12 +112,12 @@ public class StandaloneSplitter
             ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfName);
             String snapshotName = "pre-split-" + System.currentTimeMillis();
 
-            List<SSTableReader> sstables = new ArrayList<>();
+            List<SSTableReader> sstables = new ArrayList<SSTableReader>();
             for (Map.Entry<Descriptor, Set<Component>> fn : parsedFilenames.entrySet())
             {
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(fn.getKey(), fn.getValue(), cfs);
+                    SSTableReader sstable = SSTableReader.openNoValidation(fn.getKey(), fn.getValue(), cfs.metadata);
                     if (!isSSTableLargerEnough(sstable, options.sizeInMB)) {
                         System.out.println(String.format("Skipping %s: it's size (%.3f MB) is less than the split size (%d MB)",
                                 sstable.getFilename(), ((sstable.onDiskLength() * 1.0d) / 1024L) / 1024L, options.sizeInMB));
@@ -222,7 +222,7 @@ public class StandaloneSplitter
                 opts.sizeInMB = DEFAULT_SSTABLE_SIZE;
 
                 if (cmd.hasOption(SIZE_OPTION))
-                    opts.sizeInMB = Integer.parseInt(cmd.getOptionValue(SIZE_OPTION));
+                    opts.sizeInMB = Integer.valueOf(cmd.getOptionValue(SIZE_OPTION));
 
                 return opts;
             }

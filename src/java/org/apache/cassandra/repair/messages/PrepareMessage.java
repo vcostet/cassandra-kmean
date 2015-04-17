@@ -28,7 +28,6 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.UUIDSerializer;
 
 
@@ -39,15 +38,13 @@ public class PrepareMessage extends RepairMessage
     public final Collection<Range<Token>> ranges;
 
     public final UUID parentRepairSession;
-    public final boolean isIncremental;
 
-    public PrepareMessage(UUID parentRepairSession, List<UUID> cfIds, Collection<Range<Token>> ranges, boolean isIncremental)
+    public PrepareMessage(UUID parentRepairSession, List<UUID> cfIds, Collection<Range<Token>> ranges)
     {
         super(Type.PREPARE_MESSAGE, null);
         this.parentRepairSession = parentRepairSession;
         this.cfIds = cfIds;
         this.ranges = ranges;
-        this.isIncremental = isIncremental;
     }
 
     public static class PrepareMessageSerializer implements MessageSerializer<PrepareMessage>
@@ -59,12 +56,8 @@ public class PrepareMessage extends RepairMessage
                 UUIDSerializer.serializer.serialize(cfId, out, version);
             UUIDSerializer.serializer.serialize(message.parentRepairSession, out, version);
             out.writeInt(message.ranges.size());
-            for (Range<Token> r : message.ranges)
-            {
-                MessagingService.validatePartitioner(r);
-                Range.tokenSerializer.serialize(r, out, version);
-            }
-            out.writeBoolean(message.isIncremental);
+            for (Range r : message.ranges)
+                Range.serializer.serialize(r, out, version);
         }
 
         public PrepareMessage deserialize(DataInput in, int version) throws IOException
@@ -77,9 +70,8 @@ public class PrepareMessage extends RepairMessage
             int rangeCount = in.readInt();
             List<Range<Token>> ranges = new ArrayList<>(rangeCount);
             for (int i = 0; i < rangeCount; i++)
-                ranges.add((Range<Token>) Range.tokenSerializer.deserialize(in, MessagingService.globalPartitioner(), version));
-            boolean isIncremental = in.readBoolean();
-            return new PrepareMessage(parentRepairSession, cfIds, ranges, isIncremental);
+                ranges.add((Range<Token>) Range.serializer.deserialize(in, version).toTokenBounds());
+            return new PrepareMessage(parentRepairSession, cfIds, ranges);
         }
 
         public long serializedSize(PrepareMessage message, int version)
@@ -91,9 +83,8 @@ public class PrepareMessage extends RepairMessage
                 size += UUIDSerializer.serializer.serializedSize(cfId, version);
             size += UUIDSerializer.serializer.serializedSize(message.parentRepairSession, version);
             size += sizes.sizeof(message.ranges.size());
-            for (Range<Token> r : message.ranges)
-                size += Range.tokenSerializer.serializedSize(r, version);
-            size += sizes.sizeof(message.isIncremental);
+            for (Range r : message.ranges)
+                size += Range.serializer.serializedSize(r, version);
             return size;
         }
     }
@@ -105,7 +96,6 @@ public class PrepareMessage extends RepairMessage
                 "cfIds='" + cfIds + '\'' +
                 ", ranges=" + ranges +
                 ", parentRepairSession=" + parentRepairSession +
-                ", isIncremental="+isIncremental +
                 '}';
     }
 }

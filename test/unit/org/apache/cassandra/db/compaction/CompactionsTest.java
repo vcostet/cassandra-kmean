@@ -18,77 +18,48 @@
 */
 package org.apache.cassandra.db.compaction;
 
-import java.io.File;
+import java.io.*;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-
-import org.apache.cassandra.OrderedJUnit4ClassRunner;
-import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.Util;
-import org.apache.cassandra.config.KSMetaData;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.columniterator.IdentityQueryFilter;
-import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
-import org.apache.cassandra.db.filter.QueryFilter;
-import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.marshal.LongType;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.dht.*;
-import org.apache.cassandra.io.sstable.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
-import org.apache.cassandra.locator.SimpleStrategy;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import org.junit.Test;
-import org.junit.runner.RunWith;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.apache.cassandra.OrderedJUnit4ClassRunner;
+import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.Util;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.columniterator.IdentityQueryFilter;
+import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
+import org.apache.cassandra.db.filter.QueryFilter;
+import org.apache.cassandra.dht.*;
+import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
+
 import static org.junit.Assert.*;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
-public class CompactionsTest
+public class CompactionsTest extends SchemaLoader
 {
-    private static final String KEYSPACE1 = "Keyspace1";
-    private static final String CF_STANDARD1 = "CF_STANDARD1";
-    private static final String CF_STANDARD2 = "Standard2";
-    private static final String CF_STANDARD3 = "Standard3";
-    private static final String CF_STANDARD4 = "Standard4";
-    private static final String CF_SUPER1 = "Super1";
-    private static final String CF_SUPER5 = "Super5";
-    private static final String CF_SUPERGC = "SuperDirectGC";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        Map<String, String> compactionOptions = new HashMap<>();
-        compactionOptions.put("tombstone_compaction_interval", "1");
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1).compactionStrategyOptions(compactionOptions),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD2),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD3),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD4),
-                                    SchemaLoader.superCFMD(KEYSPACE1, CF_SUPER1, LongType.instance),
-                                    SchemaLoader.superCFMD(KEYSPACE1, CF_SUPER5, BytesType.instance),
-                                    SchemaLoader.superCFMD(KEYSPACE1, CF_SUPERGC, BytesType.instance).gcGraceSeconds(0));
-    }
+    private static final String STANDARD1 = "Standard1";
+    public static final String KEYSPACE1 = "Keyspace1";
 
     public ColumnFamilyStore testSingleSSTableCompaction(String strategyClassName) throws Exception
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD1);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(STANDARD1);
         store.clearUnsafe();
         store.metadata.gcGraceSeconds(1);
         store.setCompactionStrategyClass(strategyClassName);
@@ -96,7 +67,7 @@ public class CompactionsTest
         // disable compaction while flushing
         store.disableAutoCompaction();
 
-        long timestamp = populate(KEYSPACE1, CF_STANDARD1, 0, 9, 3); //ttl=3s
+        long timestamp = populate(KEYSPACE1, STANDARD1, 0, 9, 3); //ttl=3s
 
         store.forceBlockingFlush();
         assertEquals(1, store.getSSTables().size());
@@ -133,7 +104,7 @@ public class CompactionsTest
                        ByteBufferUtil.EMPTY_BYTE_BUFFER,
                        timestamp,
                        j > 0 ? ttl : 0); // let first column never expire, since deleting all columns does not produce sstable
-            rm.applyUnsafe();
+            rm.apply();
         }
         return timestamp;
     }
@@ -157,7 +128,7 @@ public class CompactionsTest
     }
 
     @Test
-    public void testSuperColumnTombstones()
+    public void testSuperColumnTombstones() throws ExecutionException, InterruptedException
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Super1");
@@ -171,16 +142,16 @@ public class CompactionsTest
         rm.add("Super1", Util.cellname(scName, ByteBufferUtil.bytes(0)),
                ByteBufferUtil.EMPTY_BYTE_BUFFER,
                FBUtilities.timestampMicros());
-        rm.applyUnsafe();
+        rm.apply();
         cfs.forceBlockingFlush();
 
         // shadow the subcolumn with a supercolumn tombstone
         rm = new Mutation(KEYSPACE1, key.getKey());
         rm.deleteRange("Super1", SuperColumns.startOf(scName), SuperColumns.endOf(scName), FBUtilities.timestampMicros());
-        rm.applyUnsafe();
+        rm.apply();
         cfs.forceBlockingFlush();
 
-        CompactionManager.instance.performMaximal(cfs, false);
+        CompactionManager.instance.performMaximal(cfs);
         assertEquals(1, cfs.getSSTables().size());
 
         // check that the shadowed column is gone
@@ -189,15 +160,15 @@ public class CompactionsTest
         ISSTableScanner scanner = sstable.getScanner(new DataRange(bounds, new IdentityQueryFilter()));
         OnDiskAtomIterator iter = scanner.next();
         assertEquals(key, iter.getKey());
-        assertTrue(iter.next() instanceof RangeTombstone);
-        assertFalse(iter.hasNext());
+        assert iter.next() instanceof RangeTombstone;
+        assert !iter.hasNext();
     }
 
     @Test
     public void testUncheckedTombstoneSizeTieredCompaction() throws Exception
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD1);
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore(STANDARD1);
         store.clearUnsafe();
         store.metadata.gcGraceSeconds(1);
         store.metadata.compactionStrategyOptions.put("tombstone_compaction_interval", "1");
@@ -209,11 +180,11 @@ public class CompactionsTest
         store.disableAutoCompaction();
 
         //Populate sstable1 with with keys [0..9]
-        populate(KEYSPACE1, CF_STANDARD1, 0, 9, 3); //ttl=3s
+        populate(KEYSPACE1, STANDARD1, 0, 9, 3); //ttl=3s
         store.forceBlockingFlush();
 
         //Populate sstable2 with with keys [10..19] (keys do not overlap with SSTable1)
-        long timestamp2 = populate(KEYSPACE1, CF_STANDARD1, 10, 19, 3); //ttl=3s
+        long timestamp2 = populate(KEYSPACE1, STANDARD1, 10, 19, 3); //ttl=3s
         store.forceBlockingFlush();
 
         assertEquals(2, store.getSSTables().size());
@@ -289,13 +260,13 @@ public class CompactionsTest
             DecoratedKey key = Util.dk(String.valueOf(i));
             Mutation rm = new Mutation(KEYSPACE1, key.getKey());
             rm.add("Standard2", Util.cellname(String.valueOf(i)), ByteBufferUtil.EMPTY_BYTE_BUFFER, i);
-            rm.applyUnsafe();
+            rm.apply();
 
             if (i % 2 == 0)
                 cfs.forceBlockingFlush();
         }
         Collection<SSTableReader> toCompact = cfs.getSSTables();
-        assertEquals(2, toCompact.size());
+        assert toCompact.size() == 2;
 
         // Reinserting the same keys. We will compact only the previous sstable, but we need those new ones
         // to make sure we use EchoedRow, otherwise it won't be used because purge can be done.
@@ -304,14 +275,14 @@ public class CompactionsTest
             DecoratedKey key = Util.dk(String.valueOf(i));
             Mutation rm = new Mutation(KEYSPACE1, key.getKey());
             rm.add("Standard2", Util.cellname(String.valueOf(i)), ByteBufferUtil.EMPTY_BYTE_BUFFER, i);
-            rm.applyUnsafe();
+            rm.apply();
         }
         cfs.forceBlockingFlush();
         SSTableReader tmpSSTable = null;
         for (SSTableReader sstable : cfs.getSSTables())
             if (!toCompact.contains(sstable))
                 tmpSSTable = sstable;
-        assertNotNull(tmpSSTable);
+        assert tmpSSTable != null;
 
         // Force compaction on first sstables. Since each row is in only one sstable, we will be using EchoedRow.
         Util.compact(cfs, toCompact);
@@ -351,16 +322,16 @@ public class CompactionsTest
             rm.add(cfname, Util.cellname("col"),
                    ByteBufferUtil.EMPTY_BYTE_BUFFER,
                    System.currentTimeMillis());
-            rm.applyUnsafe();
+            rm.apply();
         }
         cfs.forceBlockingFlush();
         Collection<SSTableReader> sstables = cfs.getSSTables();
 
-        assertEquals(1, sstables.size());
+        assert sstables.size() == 1;
         SSTableReader sstable = sstables.iterator().next();
 
         int prevGeneration = sstable.descriptor.generation;
-        String file = new File(sstable.descriptor.filenameFor(Component.DATA)).getAbsolutePath();
+        String file = new File(sstable.descriptor.filenameFor(Component.DATA)).getName();
         // submit user defined compaction on flushed sstable
         CompactionManager.instance.forceUserDefinedCompaction(file);
         // wait until user defined compaction finishes
@@ -370,12 +341,12 @@ public class CompactionsTest
         } while (CompactionManager.instance.getPendingTasks() > 0 || CompactionManager.instance.getActiveCompactions() > 0);
         // CF should have only one sstable with generation number advanced
         sstables = cfs.getSSTables();
-        assertEquals(1, sstables.size());
-        assertEquals( prevGeneration + 1, sstables.iterator().next().descriptor.generation);
+        assert sstables.size() == 1;
+        assert sstables.iterator().next().descriptor.generation == prevGeneration + 1;
     }
 
     @Test
-    public void testRangeTombstones()
+    public void testRangeTombstones() throws IOException, ExecutionException, InterruptedException
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Standard2");
@@ -399,7 +370,12 @@ public class CompactionsTest
         cf.addColumn(Util.column("a", "a", 3));
         cf.deletionInfo().add(new RangeTombstone(Util.cellname("0"), Util.cellname("b"), 2, (int) (System.currentTimeMillis()/1000)),cfmeta.comparator);
 
-        SSTableWriter writer = SSTableWriter.create(Descriptor.fromFilename(cfs.getTempSSTablePath(dir.getDirectoryForNewSSTables())), 0, 0, 0);
+        SSTableWriter writer = new SSTableWriter(cfs.getTempSSTablePath(dir.getDirectoryForNewSSTables()),
+                                                 0,
+                                                 0,
+                                                 cfs.metadata,
+                                                 StorageService.getPartitioner(),
+                                                 new MetadataCollector(cfs.metadata.comparator));
 
 
         writer.append(Util.dk("0"), cf);
@@ -407,7 +383,12 @@ public class CompactionsTest
         writer.append(Util.dk("3"), cf);
 
         cfs.addSSTable(writer.closeAndOpenReader());
-        writer = SSTableWriter.create(Descriptor.fromFilename(cfs.getTempSSTablePath(dir.getDirectoryForNewSSTables())), 0, 0, 0);
+        writer = new SSTableWriter(cfs.getTempSSTablePath(dir.getDirectoryForNewSSTables()),
+                                   0,
+                                   0,
+                                   cfs.metadata,
+                                   StorageService.getPartitioner(),
+                                   new MetadataCollector(cfs.metadata.comparator));
 
         writer.append(Util.dk("0"), cf);
         writer.append(Util.dk("1"), cf);
@@ -451,11 +432,11 @@ public class CompactionsTest
 
         String cf = "Standard4";
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(cf);
-        SchemaLoader.insertData(KEYSPACE1, cf, 0, 1);
+        insertData(KEYSPACE1, cf, 0, 1);
         cfs.forceBlockingFlush();
 
         Collection<SSTableReader> sstables = cfs.getSSTables();
-        assertFalse(sstables.isEmpty());
+        assert !sstables.isEmpty();
         Set<Integer> generations = Sets.newHashSet(Iterables.transform(sstables, new Function<SSTableReader, Integer>()
         {
             public Integer apply(SSTableReader sstable)
@@ -466,11 +447,11 @@ public class CompactionsTest
         UUID taskId = SystemKeyspace.startCompaction(cfs, sstables);
         Map<Pair<String, String>, Map<Integer, UUID>> compactionLogs = SystemKeyspace.getUnfinishedCompactions();
         Set<Integer> unfinishedCompactions = compactionLogs.get(Pair.create(KEYSPACE1, cf)).keySet();
-        assertTrue(unfinishedCompactions.containsAll(generations));
+        assert unfinishedCompactions.containsAll(generations);
 
         SystemKeyspace.finishCompaction(taskId);
         compactionLogs = SystemKeyspace.getUnfinishedCompactions();
-        assertFalse(compactionLogs.containsKey(Pair.create(KEYSPACE1, cf)));
+        assert !compactionLogs.containsKey(Pair.create(KEYSPACE1, cf));
     }
 
     private void testDontPurgeAccidentaly(String k, String cfname) throws InterruptedException
@@ -487,7 +468,7 @@ public class CompactionsTest
         DecoratedKey key = Util.dk(k);
         Mutation rm = new Mutation(KEYSPACE1, key.getKey());
         rm.add(cfname, Util.cellname(ByteBufferUtil.bytes("sc"), ByteBufferUtil.bytes("c")), ByteBufferUtil.EMPTY_BYTE_BUFFER, 0);
-        rm.applyUnsafe();
+        rm.apply();
 
         cfs.forceBlockingFlush();
 
@@ -499,7 +480,7 @@ public class CompactionsTest
         // Remove key
         rm = new Mutation(KEYSPACE1, key.getKey());
         rm.delete(cfname, 2);
-        rm.applyUnsafe();
+        rm.apply();
 
         ColumnFamily cf = cfs.getColumnFamily(filter);
         assertTrue("should be empty: " + cf, cf == null || !cf.hasColumns());
@@ -523,8 +504,8 @@ public class CompactionsTest
 
     private static Range<Token> rangeFor(int start, int end)
     {
-        return new Range<Token>(new ByteOrderedPartitioner.BytesToken(String.format("%03d", start).getBytes()),
-                                new ByteOrderedPartitioner.BytesToken(String.format("%03d", end).getBytes()));
+        return new Range<Token>(new BytesToken(String.format("%03d", start).getBytes()),
+                                new BytesToken(String.format("%03d", end).getBytes()));
     }
 
     private static Collection<Range<Token>> makeRanges(int ... keys)
@@ -540,16 +521,15 @@ public class CompactionsTest
         long timestamp = System.currentTimeMillis();
         DecoratedKey decoratedKey = Util.dk(String.format("%03d", key));
         Mutation rm = new Mutation(KEYSPACE1, decoratedKey.getKey());
-        rm.add("CF_STANDARD1", Util.cellname("col"), ByteBufferUtil.EMPTY_BYTE_BUFFER, timestamp, 1000);
-        rm.applyUnsafe();
+        rm.add("Standard1", Util.cellname("col"), ByteBufferUtil.EMPTY_BYTE_BUFFER, timestamp, 1000);
+        rm.apply();
     }
 
     @Test
-    @Ignore("making ranges based on the keys, not on the tokens")
     public void testNeedsCleanup()
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore store = keyspace.getColumnFamilyStore("CF_STANDARD1");
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard1");
         store.clearUnsafe();
 
         // disable compaction while flushing

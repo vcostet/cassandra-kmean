@@ -17,18 +17,14 @@
  */
 package org.apache.cassandra.cql3;
 
-import java.util.List;
 import java.util.Locale;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.cql3.selection.Selectable;
-import org.apache.cassandra.cql3.selection.Selector;
-import org.apache.cassandra.cql3.selection.SimpleSelector;
+import org.apache.cassandra.cql3.statements.Selectable;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -39,7 +35,7 @@ import org.apache.cassandra.utils.memory.AbstractAllocator;
  * Represents an identifer for a CQL column definition.
  * TODO : should support light-weight mode without text representation for when not interned
  */
-public class ColumnIdentifier extends org.apache.cassandra.cql3.selection.Selectable implements IMeasurableMemory
+public class ColumnIdentifier implements Selectable, IMeasurableMemory
 {
     public final ByteBuffer bytes;
     private final String text;
@@ -109,14 +105,6 @@ public class ColumnIdentifier extends org.apache.cassandra.cql3.selection.Select
         return new ColumnIdentifier(allocator.clone(bytes), text);
     }
 
-    public Selector.Factory newSelectorFactory(CFMetaData cfm, List<ColumnDefinition> defs) throws InvalidRequestException
-    {
-        ColumnDefinition def = cfm.getColumnDefinition(this);
-        if (def == null)
-            throw new InvalidRequestException(String.format("Undefined name %s in selection clause", this));
-
-        return SimpleSelector.newFactory(def.name.toString(), addAndGetIndex(def, defs), def.type);
-    }
 
     /**
      * Because Thrift-created tables may have a non-text comparator, we cannot determine the proper 'key' until

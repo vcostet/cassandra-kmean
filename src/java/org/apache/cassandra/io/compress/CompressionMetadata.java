@@ -38,7 +38,6 @@ import java.util.TreeSet;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Longs;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
@@ -47,7 +46,6 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.Memory;
@@ -64,6 +62,7 @@ public class CompressionMetadata
     // (when early opening, we want to ensure readers cannot read past fully written sections)
     public final long dataLength;
     public final long compressedFileLength;
+    public final boolean hasPostCompressionAdlerChecksums;
     private final Memory chunkOffsets;
     private final long chunkOffsetsSize;
     public final String indexFilePath;
@@ -83,13 +82,14 @@ public class CompressionMetadata
     public static CompressionMetadata create(String dataFilePath)
     {
         Descriptor desc = Descriptor.fromFilename(dataFilePath);
-        return new CompressionMetadata(desc.filenameFor(Component.COMPRESSION_INFO), new File(dataFilePath).length());
+        return new CompressionMetadata(desc.filenameFor(Component.COMPRESSION_INFO), new File(dataFilePath).length(), desc.version.hasPostCompressionAdlerChecksums);
     }
 
     @VisibleForTesting
-    CompressionMetadata(String indexFilePath, long compressedLength)
+    CompressionMetadata(String indexFilePath, long compressedLength, boolean hasPostCompressionAdlerChecksums)
     {
         this.indexFilePath = indexFilePath;
+        this.hasPostCompressionAdlerChecksums = hasPostCompressionAdlerChecksums;
 
         DataInputStream stream;
         try
@@ -105,7 +105,7 @@ public class CompressionMetadata
         {
             String compressorName = stream.readUTF();
             int optionCount = stream.readInt();
-            Map<String, String> options = new HashMap<>(optionCount);
+            Map<String, String> options = new HashMap<>();
             for (int i = 0; i < optionCount; ++i)
             {
                 String key = stream.readUTF();
@@ -134,16 +134,16 @@ public class CompressionMetadata
         {
             FileUtils.closeQuietly(stream);
         }
-
         this.chunkOffsetsSize = chunkOffsets.size();
     }
 
-    private CompressionMetadata(String filePath, CompressionParameters parameters, SafeMemory offsets, long offsetsSize, long dataLength, long compressedLength)
+    private CompressionMetadata(String filePath, CompressionParameters parameters, SafeMemory offsets, long offsetsSize, long dataLength, long compressedLength, boolean hasPostCompressionAdlerChecksums)
     {
         this.indexFilePath = filePath;
         this.parameters = parameters;
         this.dataLength = dataLength;
         this.compressedFileLength = compressedLength;
+        this.hasPostCompressionAdlerChecksums = hasPostCompressionAdlerChecksums;
         this.chunkOffsets = offsets;
         this.chunkOffsetsSize = offsetsSize;
     }
@@ -188,7 +188,7 @@ public class CompressionMetadata
             {
                 try
                 {
-                    offsets.setLong(i * 8L, input.readLong());
+                    offsets.setLong(i * 8, input.readLong());
                 }
                 catch (EOFException e)
                 {
@@ -274,7 +274,6 @@ public class CompressionMetadata
         private SafeMemory offsets = new SafeMemory(maxCount * 8L);
         private int count = 0;
 
-
         private Writer(CompressionParameters parameters, String path)
         {
             this.parameters = parameters;
@@ -290,7 +289,7 @@ public class CompressionMetadata
         {
             if (count == maxCount)
             {
-                SafeMemory newOffsets = offsets.copy((maxCount *= 2L) * 8L);
+                SafeMemory newOffsets = offsets.copy((maxCount *= 2L) * 8);
                 offsets.close();
                 offsets = newOffsets;
             }
@@ -376,7 +375,7 @@ public class CompressionMetadata
                 default:
                     throw new AssertionError();
             }
-            return new CompressionMetadata(filePath, parameters, offsets, count * 8L, dataLength, compressedLength);
+            return new CompressionMetadata(filePath, parameters, offsets, count * 8L, dataLength, compressedLength, Descriptor.Version.CURRENT.hasPostCompressionAdlerChecksums);
         }
 
         /**
@@ -394,8 +393,6 @@ public class CompressionMetadata
         /**
          * Reset the writer so that the next chunk offset written will be the
          * one of {@code chunkIndex}.
-         * 
-         * @param chunkIndex the next index to write
          */
         public void resetAndTruncate(int chunkIndex)
         {

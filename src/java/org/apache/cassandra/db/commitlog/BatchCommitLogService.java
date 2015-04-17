@@ -30,7 +30,7 @@ class BatchCommitLogService extends AbstractCommitLogService
     {
         // wait until record has been safely persisted to disk
         pending.incrementAndGet();
-        alloc.awaitDiskSync(commitLog.metrics.waitingOnCommit);
+        alloc.awaitDiskSync();
         pending.decrementAndGet();
     }
 }

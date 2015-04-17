@@ -39,9 +39,9 @@ NONALTERBALE_KEYSPACES = ('system')
 class Cql3ParsingRuleSet(CqlParsingRuleSet):
     keywords = set((
         'select', 'from', 'where', 'and', 'key', 'insert', 'update', 'with',
-        'limit', 'using', 'use', 'set',
+        'limit', 'using', 'use', 'count', 'set',
         'begin', 'apply', 'batch', 'truncate', 'delete', 'in', 'create',
-        'function', 'aggregate', 'keyspace', 'schema', 'columnfamily', 'table', 'index', 'on', 'drop',
+        'keyspace', 'schema', 'columnfamily', 'table', 'index', 'on', 'drop',
         'primary', 'into', 'values', 'date', 'time', 'timestamp', 'ttl', 'alter', 'add', 'type',
         'compact', 'storage', 'order', 'by', 'asc', 'desc', 'clustering',
         'token', 'writetime', 'map', 'list', 'to', 'custom', 'if', 'not'
@@ -149,10 +149,7 @@ syntax_rules = r'''
 
 JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
 
-<stringLiteral> ::= <quotedStringLiteral>
-                  | <pgStringLiteral> ;
-<quotedStringLiteral> ::= /'([^']|'')*'/ ;
-<pgStringLiteral> ::= /\$\$.*\$\$/;
+<stringLiteral> ::= /'([^']|'')*'/ ;
 <quotedName> ::=    /"([^"]|"")*"/ ;
 <float> ::=         /-?[0-9]+\.[0-9]+/ ;
 <uuid> ::=          /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ ;
@@ -209,11 +206,7 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
 <mapLiteral> ::= "{" <term> ":" <term> ( "," <term> ":" <term> )* "}"
                ;
 
-<userFunctionName> ::= <identifier> ( "." <identifier> )?
-               ;
-
-<functionName> ::= <userFunctionName>
-                 | "TOKEN"
+<functionName> ::= <identifier> | "TOKEN"
                  ;
 
 <statementBody> ::= <useStatement>
@@ -235,15 +228,11 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
                           | <createColumnFamilyStatement>
                           | <createIndexStatement>
                           | <createUserTypeStatement>
-                          | <createFunctionStatement>
-                          | <createAggregateStatement>
                           | <createTriggerStatement>
                           | <dropKeyspaceStatement>
                           | <dropColumnFamilyStatement>
                           | <dropIndexStatement>
                           | <dropUserTypeStatement>
-                          | <dropFunctionStatement>
-                          | <dropAggregateStatement>
                           | <dropTriggerStatement>
                           | <alterTableStatement>
                           | <alterKeyspaceStatement>
@@ -254,16 +243,10 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
                             | <alterUserStatement>
                             | <dropUserStatement>
                             | <listUsersStatement>
-                            | <createRoleStatement>
-                            | <alterRoleStatement>
-                            | <dropRoleStatement>
-                            | <listRolesStatement>
                             ;
 
 <authorizationStatement> ::= <grantStatement>
-                           | <grantRoleStatement>
                            | <revokeStatement>
-                           | <revokeRoleStatement>
                            | <listPermissionsStatement>
                            ;
 
@@ -303,6 +286,7 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
 <unreservedKeyword> ::= nocomplete=
                         ( <K_KEY>
                         | <K_CLUSTERING>
+                        # | <K_COUNT>  -- to get count(*) completion, treat count as reserved
                         | <K_TTL>
                         | <K_COMPACT>
                         | <K_STORAGE>
@@ -612,7 +596,7 @@ def working_on_keyspace(ctxt):
 syntax_rules += r'''
 <useStatement> ::= "USE" <keyspaceName>
                  ;
-<selectStatement> ::= "SELECT" ( "JSON" )? <selectClause>
+<selectStatement> ::= "SELECT" <selectClause>
                         "FROM" cf=<columnFamilyName>
                           ( "WHERE" <whereClause> )?
                           ( "ORDER" "BY" <orderByClause> ( "," <orderByClause> )* )?
@@ -621,7 +605,7 @@ syntax_rules += r'''
                     ;
 <whereClause> ::= <relation> ( "AND" <relation> )*
                 ;
-<relation> ::= [rel_lhs]=<cident> ( "[" <term> "]" )? ( "=" | "<" | ">" | "<=" | ">=" | "CONTAINS" ( "KEY" )? ) <term>
+<relation> ::= [rel_lhs]=<cident> ( "=" | "<" | ">" | "<=" | ">=" | "CONTAINS" ( "KEY" )? ) <term>
              | token="TOKEN" "(" [rel_tokname]=<cident>
                                  ( "," [rel_tokname]=<cident> )*
                              ")" ("=" | "<" | ">" | "<=" | ">=") <tokenDefinition>
@@ -629,6 +613,7 @@ syntax_rules += r'''
              ;
 <selectClause> ::= "DISTINCT"? <selector> ("AS" <cident>)? ("," <selector> ("AS" <cident>)?)*
                  | "*"
+                 | "COUNT" "(" star=( "*" | "1" ) ")" ("AS" <cident>)?
                  ;
 <udtSubfieldSelection> ::= <identifier> "." <identifier>
                          ;
@@ -636,7 +621,6 @@ syntax_rules += r'''
              | <udtSubfieldSelection>
              | "WRITETIME" "(" [colname]=<cident> ")"
              | "TTL" "(" [colname]=<cident> ")"
-             | "COUNT" "(" star=( "*" | "1" ) ")"
              | <functionName> <selectionFunctionArguments>
              ;
 <selectionFunctionArguments> ::= "(" ( <selector> ( "," <selector> )* )? ")"
@@ -688,13 +672,18 @@ def select_relation_lhs_completer(ctxt, cass):
             filterable.add(cd.name)
     return map(maybe_escape_name, filterable)
 
+@completer_for('selectClause', 'star')
+def select_count_star_completer(ctxt, cass):
+    return ['*']
+
 explain_completion('selector', 'colname')
 
 syntax_rules += r'''
 <insertStatement> ::= "INSERT" "INTO" cf=<columnFamilyName>
-                      ( ( "(" [colname]=<cident> ( "," [colname]=<cident> )* ")"
-                          "VALUES" "(" [newval]=<term> ( valcomma="," [newval]=<term> )* valcomma=")")
-                        | ("JSON" <stringLiteral>))
+                               "(" [colname]=<cident> "," [colname]=<cident>
+                                   ( "," [colname]=<cident> )* ")"
+                      "VALUES" "(" [newval]=<term> valcomma="," [newval]=<term>
+                                   ( valcomma="," [newval]=<term> )* valcomma=")"
                       ( "IF" "NOT" "EXISTS")?
                       ( "USING" [insertopt]=<usingOption>
                                 ( "AND" [insertopt]=<usingOption> )* )?
@@ -1020,30 +1009,6 @@ syntax_rules += r'''
                                 ( "," [newcolname]=<cident> <storageType> )*
                             ")"
                          ;
-
-<createFunctionStatement> ::= "CREATE" ("OR" "REPLACE")? "FUNCTION"
-                            ("IF" "NOT" "EXISTS")?
-                            ("NON"? "DETERMINISTIC")?
-                            <userFunctionName>
-                            ( "(" ( newcol=<cident> <storageType>
-                              ( "," [newcolname]=<cident> <storageType> )* )?
-                            ")" )?
-                            "RETURNS" <storageType>
-                            "LANGUAGE" <cident> "AS" <stringLiteral>
-                         ;
-
-<createAggregateStatement> ::= "CREATE" ("OR" "REPLACE")? "AGGREGATE"
-                            ("IF" "NOT" "EXISTS")?
-                            <userFunctionName>
-                            ( "("
-                                 ( <storageType> ( "," <storageType> )* )?
-                              ")" )?
-                            "SFUNC" <identifier>
-                            "STYPE" <storageType>
-                            ( "FINALFUNC" <identifier> )?
-                            ( "INITCOND" <term> )?
-                         ;
-
 '''
 
 explain_completion('createIndexStatement', 'indexname', '<new_index_name>')
@@ -1073,13 +1038,7 @@ syntax_rules += r'''
                        ;
 
 <dropUserTypeStatement> ::= "DROP" "TYPE" ut=<userTypeName>
-                          ;
-
-<dropFunctionStatement> ::= "DROP" "FUNCTION" ( "IF" "EXISTS" )? <userFunctionName>
-                          ;
-
-<dropAggregateStatement> ::= "DROP" "AGGREGATE" ( "IF" "EXISTS" )? <userFunctionName>
-                          ;
+                              ;
 
 '''
 
@@ -1173,48 +1132,14 @@ syntax_rules += r'''
 '''
 
 syntax_rules += r'''
-<rolename> ::= <identifier>
-             | <quotedName>
-             | <unreservedKeyword>
-             ;
-
-<createRoleStatement> ::= "CREATE" "ROLE" <rolename>
-                              ( "WITH" <roleProperty> ("AND" <roleProperty>)*)?
-                        ;
-
-<alterRoleStatement> ::= "ALTER" "ROLE" <rolename>
-                              ( "WITH" <roleProperty> ("AND" <roleProperty>)*)?
-                       ;
-
-<roleProperty> ::= "PASSWORD" "=" <stringLiteral>
-                 | "OPTIONS" "=" <mapLiteral>
-                 | "SUPERUSER" "=" <boolean>
-                 | "LOGIN" "=" <boolean>
-                 ;
-
-<dropRoleStatement> ::= "DROP" "ROLE" <rolename>
-                      ;
-
-<grantRoleStatement> ::= "GRANT" <rolename> "TO" <rolename>
-                       ;
-
-<revokeRoleStatement> ::= "REVOKE" <rolename> "FROM" <rolename>
-                        ;
-
-<listRolesStatement> ::= "LIST" "ROLES"
-                              ( "OF" <rolename> )? "NORECURSIVE"?
-                       ;
-'''
-
-syntax_rules += r'''
-<grantStatement> ::= "GRANT" <permissionExpr> "ON" <resource>  "TO" <rolename>
+<grantStatement> ::= "GRANT" <permissionExpr> "ON" <resource> "TO" <username>
                    ;
 
-<revokeStatement> ::= "REVOKE" <permissionExpr> "ON" <resource> "FROM" <rolename>
+<revokeStatement> ::= "REVOKE" <permissionExpr> "ON" <resource> "FROM" <username>
                     ;
 
 <listPermissionsStatement> ::= "LIST" <permissionExpr>
-                                    ( "ON" <resource> )? ( "OF" <rolename> )? "NORECURSIVE"?
+                                    ( "ON" <resource> )? ( "OF" <username> )? "NORECURSIVE"?
                              ;
 
 <permission> ::= "AUTHORIZE"
@@ -1223,7 +1148,6 @@ syntax_rules += r'''
                | "DROP"
                | "SELECT"
                | "MODIFY"
-               | "DESCRIBE"
                ;
 
 <permissionExpr> ::= ( <permission> "PERMISSION"? )
@@ -1231,16 +1155,11 @@ syntax_rules += r'''
                    ;
 
 <resource> ::= <dataResource>
-             | <roleResource>
              ;
 
 <dataResource> ::= ( "ALL" "KEYSPACES" )
                  | ( "KEYSPACE" <keyspaceName> )
                  | ( "TABLE"? <columnFamilyName> )
-                 ;
-
-<roleResource> ::= ("ALL" "ROLES")
-                 | ("ROLE" <rolename>)
                  ;
 '''
 
@@ -1258,24 +1177,11 @@ def username_name_completer(ctxt, cass):
     session = cass.session
     return [maybe_quote(row.values()[0].replace("'", "''")) for row in session.execute("LIST USERS")]
 
-@completer_for('rolename', 'role')
-def rolename_completer(ctxt, cass):
-    def maybe_quote(name):
-        if CqlRuleSet.is_valid_cql3_name(name):
-            return name
-        return "'%s'" % name
-
-    # disable completion for CREATE ROLE.
-    if ctxt.matched[0][0] == 'K_CREATE':
-        return [Hint('<rolename>')]
-
-    session = cass.session
-    return [maybe_quote(row[0].replace("'", "''")) for row in session.execute("LIST ROLES")]
-
 syntax_rules += r'''
 <createTriggerStatement> ::= "CREATE" "TRIGGER" ( "IF" "NOT" "EXISTS" )? <cident>
                                "ON" cf=<columnFamilyName> "USING" class=<stringLiteral>
                            ;
+
 <dropTriggerStatement> ::= "DROP" "TRIGGER" ( "IF" "EXISTS" )? triggername=<cident>
                              "ON" cf=<columnFamilyName>
                          ;

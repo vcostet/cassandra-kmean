@@ -18,17 +18,22 @@
 package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.ColumnFamily;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.Composite;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
-import org.apache.cassandra.serializers.MapSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.FBUtilities;
@@ -94,36 +99,24 @@ public abstract class Maps
             ColumnSpecification valueSpec = Maps.valueSpecOf(receiver);
             for (Pair<Term.Raw, Term.Raw> entry : entries)
             {
-                if (!entry.left.testAssignment(keyspace, keySpec).isAssignable())
+                if (!entry.left.isAssignableTo(keyspace, keySpec))
                     throw new InvalidRequestException(String.format("Invalid map literal for %s: key %s is not of type %s", receiver.name, entry.left, keySpec.type.asCQL3Type()));
-                if (!entry.right.testAssignment(keyspace, valueSpec).isAssignable())
+                if (!entry.right.isAssignableTo(keyspace, valueSpec))
                     throw new InvalidRequestException(String.format("Invalid map literal for %s: value %s is not of type %s", receiver.name, entry.right, valueSpec.type.asCQL3Type()));
             }
         }
 
-        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
-            if (!(receiver.type instanceof MapType))
-                return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
-
-            // If there is no elements, we can't say it's an exact match (an empty map if fundamentally polymorphic).
-            if (entries.isEmpty())
-                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-
-            ColumnSpecification keySpec = Maps.keySpecOf(receiver);
-            ColumnSpecification valueSpec = Maps.valueSpecOf(receiver);
-            // It's an exact match if all are exact match, but is not assignable as soon as any is non assignable.
-            AssignmentTestable.TestResult res = AssignmentTestable.TestResult.EXACT_MATCH;
-            for (Pair<Term.Raw, Term.Raw> entry : entries)
+            try
             {
-                AssignmentTestable.TestResult t1 = entry.left.testAssignment(keyspace, keySpec);
-                AssignmentTestable.TestResult t2 = entry.right.testAssignment(keyspace, valueSpec);
-                if (t1 == AssignmentTestable.TestResult.NOT_ASSIGNABLE || t2 == AssignmentTestable.TestResult.NOT_ASSIGNABLE)
-                    return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
-                if (t1 != AssignmentTestable.TestResult.EXACT_MATCH || t2 != AssignmentTestable.TestResult.EXACT_MATCH)
-                    res = AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                validateAssignableTo(keyspace, receiver);
+                return true;
             }
-            return res;
+            catch (InvalidRequestException e)
+            {
+                return false;
+            }
         }
 
         @Override
@@ -141,7 +134,7 @@ public abstract class Maps
         }
     }
 
-    public static class Value extends Term.Terminal
+    public static class Value extends Term.Terminal implements Term.CollectionTerminal
     {
         public final Map<ByteBuffer, ByteBuffer> map;
 
@@ -168,7 +161,12 @@ public abstract class Maps
             }
         }
 
-        public ByteBuffer get(int protocolVersion)
+        public ByteBuffer get(QueryOptions options)
+        {
+            return getWithProtocolVersion(options.getProtocolVersion());
+        }
+
+        public ByteBuffer getWithProtocolVersion(int protocolVersion)
         {
             List<ByteBuffer> buffers = new ArrayList<>(2 * map.size());
             for (Map.Entry<ByteBuffer, ByteBuffer> entry : map.entrySet())
@@ -343,13 +341,13 @@ public abstract class Maps
         static void doPut(Term t, ColumnFamily cf, Composite prefix, ColumnDefinition column, UpdateParameters params) throws InvalidRequestException
         {
             Term.Terminal value = t.bind(params.options);
+            Maps.Value mapValue = (Maps.Value) value;
             if (column.type.isMultiCell())
             {
                 if (value == null)
                     return;
 
-                Map<ByteBuffer, ByteBuffer> elements = ((Value) value).map;
-                for (Map.Entry<ByteBuffer, ByteBuffer> entry : elements.entrySet())
+                for (Map.Entry<ByteBuffer, ByteBuffer> entry : mapValue.map.entrySet())
                 {
                     CellName cellName = cf.getComparator().create(prefix, column, entry.getKey());
                     cf.addColumn(params.makeColumn(cellName, entry.getValue()));
@@ -362,7 +360,7 @@ public abstract class Maps
                 if (value == null)
                     cf.addAtom(params.makeTombstone(cellName));
                 else
-                    cf.addColumn(params.makeColumn(cellName, value.get(Server.CURRENT_VERSION)));
+                    cf.addColumn(params.makeColumn(cellName, mapValue.getWithProtocolVersion(Server.CURRENT_VERSION)));
             }
         }
     }
@@ -381,7 +379,7 @@ public abstract class Maps
             if (key == null)
                 throw new InvalidRequestException("Invalid null map key");
 
-            CellName cellName = cf.getComparator().create(prefix, column, key.get(params.options.getProtocolVersion()));
+            CellName cellName = cf.getComparator().create(prefix, column, key.get(params.options));
             cf.addColumn(params.makeTombstone(cellName));
         }
     }

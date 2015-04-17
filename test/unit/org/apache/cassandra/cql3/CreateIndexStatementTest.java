@@ -19,7 +19,7 @@ package org.apache.cassandra.cql3;
 
 import java.util.Locale;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang.StringUtils;
 
 import org.junit.Test;
 
@@ -79,7 +79,7 @@ public class CreateIndexStatementTest extends CQLTester
         else
         {
             execute("USE " + KEYSPACE);
-            execute("DROP INDEX " + indexName);
+            dropIndex("DROP INDEX " + indexName);
         }
 
         assertInvalidMessage("No secondary indexes on the restricted columns support the provided operators",

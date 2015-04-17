@@ -27,6 +27,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.CASRequest;
 import org.apache.cassandra.utils.Pair;
@@ -81,7 +82,7 @@ public class CQL3CasRequest implements CASRequest
     {
         RowCondition previous = conditions.put(prefix, new ExistCondition(prefix, now));
         // this should be prevented by the parser, but it doesn't hurt to check
-        if (previous instanceof NotExistCondition)
+        if (previous != null && previous instanceof NotExistCondition)
             throw new InvalidRequestException("Cannot mix IF EXISTS and IF NOT EXISTS conditions for the same row");
     }
 

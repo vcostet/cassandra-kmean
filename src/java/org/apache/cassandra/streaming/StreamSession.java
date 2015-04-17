@@ -25,7 +25,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.collect.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,12 +38,15 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.metrics.StreamingMetrics;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.messages.*;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.RefCounted;
+
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.Refs;
 
@@ -130,7 +132,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     private StreamResultFuture streamResult;
 
     // stream requests to send to the peer
-    protected final Set<StreamRequest> requests = Sets.newConcurrentHashSet();
+    private final Set<StreamRequest> requests = Sets.newConcurrentHashSet();
     // streaming tasks are created and managed per ColumnFamily ID
     private final Map<UUID, StreamTransferTask> transfers = new ConcurrentHashMap<>();
     // data receivers, filled after receiving prepare message
@@ -144,7 +146,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     private int retries;
 
     private AtomicBoolean isAborted = new AtomicBoolean(false);
-    private final boolean keepSSTableLevel;
 
     public static enum State
     {
@@ -166,7 +167,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      * @param connecting Actual connecting address
      * @param factory is used for establishing connection
      */
-    public StreamSession(InetAddress peer, InetAddress connecting, StreamConnectionFactory factory, int index, boolean keepSSTableLevel)
+    public StreamSession(InetAddress peer, InetAddress connecting, StreamConnectionFactory factory, int index)
     {
         this.peer = peer;
         this.connecting = connecting;
@@ -174,7 +175,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         this.factory = factory;
         this.handler = new ConnectionHandler(this);
         this.metrics = StreamingMetrics.get(connecting);
-        this.keepSSTableLevel = keepSSTableLevel;
     }
 
     public UUID planId()
@@ -190,11 +190,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     public String description()
     {
         return streamResult == null ? null : streamResult.description;
-    }
-
-    public boolean keepSSTableLevel()
-    {
-        return keepSSTableLevel;
     }
 
     /**
@@ -268,7 +263,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
             flushSSTables(stores);
 
         List<Range<Token>> normalizedRanges = Range.normalize(ranges);
-        List<SSTableStreamingSections> sections = getSSTableSectionsForRanges(normalizedRanges, stores, repairedAt);
+        List<SSTableStreamingSections> sections = getSSTableSectionsForRanges(normalizedRanges, stores, repairedAt, repairedAt != ActiveRepairService.UNREPAIRED_SSTABLE);
         try
         {
             addTransferFiles(sections);
@@ -296,7 +291,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         return stores;
     }
 
-    private List<SSTableStreamingSections> getSSTableSectionsForRanges(Collection<Range<Token>> ranges, Collection<ColumnFamilyStore> stores, long overriddenRepairedAt)
+    private List<SSTableStreamingSections> getSSTableSectionsForRanges(Collection<Range<Token>> ranges, Collection<ColumnFamilyStore> stores, long overriddenRepairedAt, boolean isIncremental)
     {
         Refs<SSTableReader> refs = new Refs<>();
         try
@@ -305,8 +300,8 @@ public class StreamSession implements IEndpointStateChangeSubscriber
             {
                 List<AbstractBounds<RowPosition>> rowBoundsList = new ArrayList<>(ranges.size());
                 for (Range<Token> range : ranges)
-                    rowBoundsList.add(Range.makeRowRange(range));
-                refs.addAll(cfStore.selectAndReference(cfStore.viewFilter(rowBoundsList)).refs);
+                    rowBoundsList.add(range.toRowBounds());
+                refs.addAll(cfStore.selectAndReference(cfStore.viewFilter(rowBoundsList, !isIncremental)).refs);
             }
 
             List<SSTableStreamingSections> sections = new ArrayList<>(refs.size());

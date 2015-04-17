@@ -29,6 +29,7 @@ import java.util.Arrays;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.composites.SimpleDenseCellNameType;
@@ -40,7 +41,7 @@ import org.apache.cassandra.utils.*;
 import static org.apache.cassandra.Util.cellname;
 import static org.apache.cassandra.db.context.CounterContext.ContextState;
 
-public class CounterCellTest
+public class CounterCellTest extends SchemaLoader
 {
     private static final CounterContext cc = new CounterContext();
 

@@ -20,7 +20,6 @@ package org.apache.cassandra.service;
 import java.net.InetAddress;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -34,11 +33,12 @@ import org.apache.cassandra.db.WriteType;
 /**
  * This class blocks for a quorum of responses _in all datacenters_ (CL.EACH_QUORUM).
  */
-public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
+public class DatacenterSyncWriteResponseHandler extends AbstractWriteResponseHandler
 {
     private static final IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
 
-    private final Map<String, AtomicInteger> responses = new HashMap<String, AtomicInteger>();
+    private final NetworkTopologyStrategy strategy;
+    private final HashMap<String, AtomicInteger> responses = new HashMap<String, AtomicInteger>();
     private final AtomicInteger acks = new AtomicInteger(0);
 
     public DatacenterSyncWriteResponseHandler(Collection<InetAddress> naturalEndpoints,
@@ -52,7 +52,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
         super(keyspace, naturalEndpoints, pendingEndpoints, consistencyLevel, callback, writeType);
         assert consistencyLevel == ConsistencyLevel.EACH_QUORUM;
 
-        NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();
+        strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();
 
         for (String dc : strategy.getDatacenters())
         {
@@ -68,7 +68,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
         }
     }
 
-    public void response(MessageIn<T> message)
+    public void response(MessageIn message)
     {
         String dataCenter = message == null
                             ? DatabaseDescriptor.getLocalDataCenter()

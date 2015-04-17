@@ -31,12 +31,12 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.service.CacheService;
@@ -59,7 +59,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
     protected volatile ScheduledFuture<?> saveTask;
     protected final CacheService.CacheType cacheType;
 
-    private final CacheSerializer<K, V> cacheLoader;
+    private CacheSerializer<K, V> cacheLoader;
     private static final String CURRENT_VERSION = "b";
 
     private static volatile IStreamFactory streamFactory = new IStreamFactory()
@@ -86,6 +86,12 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
         super(cacheType.toString(), cache);
         this.cacheType = cacheType;
         this.cacheLoader = cacheloader;
+    }
+
+    @Deprecated
+    public File getCachePath(String ksName, String cfName, UUID cfId, String version)
+    {
+        return DatabaseDescriptor.getSerializedCachePath(ksName, cfName, cfId, cacheType, version);
     }
 
     public File getCachePath(UUID cfId, String version)
@@ -129,6 +135,9 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
 
         // modern format, allows both key and value (so key cache load can be purely sequential)
         File path = getCachePath(cfs.metadata.cfId, CURRENT_VERSION);
+        // if path does not exist, try without cfId (assuming saved cache is created with current CF)
+        if (!path.exists())
+            path = getCachePath(cfs.keyspace.getName(), cfs.name, null, CURRENT_VERSION);
         if (path.exists())
         {
             DataInputStream in = null;
@@ -177,24 +186,16 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
 
     public class Writer extends CompactionInfo.Holder
     {
-        private final Iterator<K> keyIterator;
+        private final Set<K> keys;
         private final CompactionInfo info;
         private long keysWritten;
-        private final long keysEstimate;
 
         protected Writer(int keysToSave)
         {
-            int size = size();
-            if (keysToSave >= size || keysToSave == 0)
-            {
-                keyIterator = keyIterator();
-                keysEstimate = size;
-            }
+            if (keysToSave >= getKeySet().size())
+                keys = getKeySet();
             else
-            {
-                keyIterator = hotKeyIterator(keysToSave);
-                keysEstimate = keysToSave;
-            }
+                keys = hotKeySet(keysToSave);
 
             OperationType type;
             if (cacheType == CacheService.CacheType.KEY_CACHE)
@@ -206,10 +207,10 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             else
                 type = OperationType.UNKNOWN;
 
-            info = new CompactionInfo(CFMetaData.denseCFMetaData(SystemKeyspace.NAME, cacheType.toString(), BytesType.instance),
+            info = new CompactionInfo(CFMetaData.denseCFMetaData(Keyspace.SYSTEM_KS, cacheType.toString(), BytesType.instance),
                                       type,
                                       0,
-                                      keysEstimate,
+                                      keys.size(),
                                       "keys");
         }
 
@@ -221,8 +222,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
         public CompactionInfo getCompactionInfo()
         {
             // keyset can change in size, thus total can too
-            // TODO need to check for this one... was: info.forProgress(keysWritten, Math.max(keysWritten, keys.size()));
-            return info.forProgress(keysWritten, Math.max(keysWritten, keysEstimate));
+            return info.forProgress(keysWritten, Math.max(keysWritten, keys.size()));
         }
 
         public void saveCache()
@@ -230,7 +230,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             logger.debug("Deleting old {} files.", cacheType);
             deleteOldCacheFiles();
 
-            if (!keyIterator.hasNext())
+            if (keys.isEmpty())
             {
                 logger.debug("Skipping {} save, cache is empty.", cacheType);
                 return;
@@ -244,9 +244,8 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
 
             try
             {
-                while (keyIterator.hasNext())
+                for (K key : keys)
                 {
-                    K key = keyIterator.next();
                     UUID cfId = key.getCFId();
                     if (!Schema.instance.hasCF(key.getCFId()))
                         continue; // the table has been dropped.
@@ -259,7 +258,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                         try
                         {
                             stream = streamFactory.getOutputStream(writerPath);
-                            writer = new WrappedDataOutputStreamPlus(stream);
+                            writer = new DataOutputStreamPlus(stream);
                         }
                         catch (FileNotFoundException e)
                         {
@@ -280,22 +279,10 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                     }
 
                     keysWritten++;
-                    if (keysWritten >= keysEstimate)
-                        break;
                 }
             }
             finally
             {
-                if (keyIterator instanceof Closeable)
-                    try
-                    {
-                        ((Closeable)keyIterator).close();
-                    }
-                    catch (IOException ignored)
-                    {
-                        // not thrown (by OHC)
-                    }
-
                 for (OutputStream writer : streams.values())
                     FileUtils.closeQuietly(writer);
             }
@@ -312,7 +299,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                     logger.error("Unable to rename {} to {}", tmpFile, cacheFile);
             }
 
-            logger.info("Saved {} ({} items) in {} ms", cacheType, keysWritten, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+            logger.info("Saved {} ({} items) in {} ms", cacheType, keys.size(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
         }
 
         private File tempCacheFile(UUID cfId)
@@ -328,14 +315,13 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
             File[] files = savedCachesDir.listFiles();
             if (files != null)
             {
-                String cacheNameFormat = String.format("%s-%s.db", cacheType.toString(), CURRENT_VERSION);
                 for (File file : files)
                 {
                     if (!file.isFile())
                         continue; // someone's been messing with our directory.  naughty!
 
-                    if (file.getName().endsWith(cacheNameFormat)
-                     || file.getName().endsWith(cacheType.toString()))
+                    if (file.getName().endsWith(cacheType.toString())
+                            || file.getName().endsWith(String.format("%s-%s.db", cacheType.toString(), CURRENT_VERSION)))
                     {
                         if (!file.delete())
                             logger.warn("Failed to delete {}", file.getAbsolutePath());

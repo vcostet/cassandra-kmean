@@ -18,86 +18,51 @@
 */
 package org.apache.cassandra.tools;
 
+import static org.apache.cassandra.Util.column;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.apache.cassandra.io.sstable.SSTableUtils.tempSSTableFile;
+import static org.apache.cassandra.utils.ByteBufferUtil.bytesToHex;
+import static org.apache.cassandra.utils.ByteBufferUtil.hexToBytes;
+
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintStream;
 
-import org.junit.BeforeClass;
-import org.junit.Test;
-
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.KSMetaData;
-import org.apache.cassandra.db.ArrayBackedSortedColumns;
-import org.apache.cassandra.db.BufferCell;
-import org.apache.cassandra.db.BufferCounterCell;
-import org.apache.cassandra.db.BufferExpiringCell;
-import org.apache.cassandra.db.ColumnFamily;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DeletionInfo;
-import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.QueryFilter;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.marshal.CounterColumnType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.marshal.UUIDType;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.io.sstable.SSTableReader;
+import org.apache.cassandra.io.sstable.SSTableWriter;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
-import org.apache.thrift.TException;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
 import org.json.simple.parser.ParseException;
+import org.junit.Test;
 
-import static org.apache.cassandra.Util.column;
-import static org.apache.cassandra.io.sstable.SSTableUtils.tempSSTableFile;
-import static org.apache.cassandra.utils.ByteBufferUtil.bytesToHex;
-import static org.apache.cassandra.utils.ByteBufferUtil.hexToBytes;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-
-public class SSTableExportTest
+public class SSTableExportTest extends SchemaLoader
 {
-    public static final String KEYSPACE1 = "SSTableExportTest";
-    public static final String CF_STANDARD = "Standard1";
-    public static final String CF_COUNTER = "Counter1";
-    public static final String CF_UUID = "UUIDKeys";
-    public static final String CF_VALSWITHQUOTES = "ValuesWithQuotes";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD),
-                                    CFMetaData.denseCFMetaData(KEYSPACE1, CF_COUNTER, BytesType.instance).defaultValidator(CounterColumnType.instance),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_UUID).keyValidator(UUIDType.instance),
-                                    CFMetaData.denseCFMetaData(KEYSPACE1, CF_VALSWITHQUOTES, BytesType.instance).defaultValidator(UTF8Type.instance),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, "AsciiKeys").keyValidator(AsciiType.instance));
-    }
-
     public String asHex(String str)
     {
         return bytesToHex(ByteBufferUtil.bytes(str));
     }
-
+    
     @Test
     public void testEnumeratekeys() throws IOException
     {
-        File tempSS = tempSSTableFile(KEYSPACE1, "Standard1");
-        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create(KEYSPACE1, "Standard1");
-        SSTableWriter writer = SSTableWriter.create(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE, 0);
+        File tempSS = tempSSTableFile("Keyspace1", "Standard1");
+        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
+        SSTableWriter writer = new SSTableWriter(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
 
         // Add rowA
         cfamily.addColumn(Util.cellname("colA"), ByteBufferUtil.bytes("valA"), System.currentTimeMillis());
@@ -123,7 +88,7 @@ public class SSTableExportTest
             char[] buf = new char[(int) temp.length()];
             file.read(buf);
             String output = new String(buf);
-
+    
             String sep = System.getProperty("line.separator");
             assert output.equals(asHex("rowA") + sep + asHex("rowB") + sep) : output;
         }
@@ -132,9 +97,9 @@ public class SSTableExportTest
     @Test
     public void testExportSimpleCf() throws IOException, ParseException
     {
-        File tempSS = tempSSTableFile(KEYSPACE1, "Standard1");
-        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create(KEYSPACE1, "Standard1");
-        SSTableWriter writer = SSTableWriter.create(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE, 0);
+        File tempSS = tempSSTableFile("Keyspace1", "Standard1");
+        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
+        SSTableWriter writer = new SSTableWriter(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
 
         int nowInSec = (int)(System.currentTimeMillis() / 1000) + 42; //live for 42 seconds
         // Add rowA
@@ -157,7 +122,8 @@ public class SSTableExportTest
 
         // Export to JSON and verify
         File tempJson = File.createTempFile("Standard1", ".json");
-        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[]{asHex("rowExclude")});
+        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[]{asHex("rowExclude")},
+                CFMetaData.sparseCFMetaData("Keyspace1", "Standard1", BytesType.instance));
 
         JSONArray json = (JSONArray)JSONValue.parseWithException(new FileReader(tempJson));
         assertEquals("unexpected number of rows", 2, json.size());
@@ -187,10 +153,10 @@ public class SSTableExportTest
     @Test
     public void testRoundTripStandardCf() throws IOException
     {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore("Standard1");
-        File tempSS = tempSSTableFile(KEYSPACE1, "Standard1");
-        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create(KEYSPACE1, "Standard1");
-        SSTableWriter writer = SSTableWriter.create(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE, 0);
+        ColumnFamilyStore cfs = Keyspace.open("Keyspace1").getColumnFamilyStore("Standard1");
+        File tempSS = tempSSTableFile("Keyspace1", "Standard1");
+        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
+        SSTableWriter writer = new SSTableWriter(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
 
         // Add rowA
         cfamily.addColumn(Util.cellname("name"), ByteBufferUtil.bytes("val"), System.currentTimeMillis());
@@ -206,11 +172,12 @@ public class SSTableExportTest
 
         // Export to JSON and verify
         File tempJson = File.createTempFile("Standard1", ".json");
-        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[]{asHex("rowExclude")});
+        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[]{asHex("rowExclude")},
+                CFMetaData.sparseCFMetaData("Keyspace1", "Standard1", BytesType.instance));
 
         // Import JSON to another SSTable file
-        File tempSS2 = tempSSTableFile(KEYSPACE1, "Standard1");
-        new SSTableImport().importJson(tempJson.getPath(), KEYSPACE1, "Standard1", tempSS2.getPath());
+        File tempSS2 = tempSSTableFile("Keyspace1", "Standard1");
+        new SSTableImport().importJson(tempJson.getPath(), "Keyspace1", "Standard1", tempSS2.getPath());
 
         reader = SSTableReader.open(Descriptor.fromFilename(tempSS2.getPath()));
         QueryFilter qf = Util.namesQueryFilter(cfs, Util.dk("rowA"), "name");
@@ -228,9 +195,9 @@ public class SSTableExportTest
     @Test
     public void testExportCounterCf() throws IOException, ParseException
     {
-        File tempSS = tempSSTableFile(KEYSPACE1, "Counter1");
-        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create(KEYSPACE1, "Counter1");
-        SSTableWriter writer = SSTableWriter.create(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE, 0);
+        File tempSS = tempSSTableFile("Keyspace1", "Counter1");
+        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create("Keyspace1", "Counter1");
+        SSTableWriter writer = new SSTableWriter(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
 
         // Add rowA
         cfamily.addColumn(BufferCounterCell.createLocal(Util.cellname("colA"), 42, System.currentTimeMillis(), Long.MIN_VALUE));
@@ -241,7 +208,8 @@ public class SSTableExportTest
 
         // Export to JSON and verify
         File tempJson = File.createTempFile("Counter1", ".json");
-        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[0]);
+        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[0],
+                CFMetaData.sparseCFMetaData("Keyspace1", "Counter1", BytesType.instance));
         JSONArray json = (JSONArray)JSONValue.parseWithException(new FileReader(tempJson));
         assertEquals("unexpected number of rows", 1, json.size());
 
@@ -259,9 +227,9 @@ public class SSTableExportTest
     @Test
     public void testEscapingDoubleQuotes() throws IOException, ParseException
     {
-        File tempSS = tempSSTableFile(KEYSPACE1, "ValuesWithQuotes");
-        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create(KEYSPACE1, "ValuesWithQuotes");
-        SSTableWriter writer = SSTableWriter.create(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
+        File tempSS = tempSSTableFile("Keyspace1", "ValuesWithQuotes");
+        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create("Keyspace1", "ValuesWithQuotes");
+        SSTableWriter writer = new SSTableWriter(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
 
         // Add rowA
         cfamily.addColumn(new BufferCell(Util.cellname("data"), UTF8Type.instance.fromString("{\"foo\":\"bar\"}")));
@@ -272,7 +240,8 @@ public class SSTableExportTest
 
         // Export to JSON and verify
         File tempJson = File.createTempFile("ValuesWithQuotes", ".json");
-        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[0]);
+        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[0],
+                CFMetaData.sparseCFMetaData("Keyspace1", "ValuesWithQuotes", BytesType.instance));
 
         JSONArray json = (JSONArray)JSONValue.parseWithException(new FileReader(tempJson));
         assertEquals("unexpected number of rows", 1, json.size());
@@ -290,9 +259,9 @@ public class SSTableExportTest
     @Test
     public void testExportColumnsWithMetadata() throws IOException, ParseException
     {
-        File tempSS = tempSSTableFile(KEYSPACE1, "Standard1");
-        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create(KEYSPACE1, "Standard1");
-        SSTableWriter writer = SSTableWriter.create(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
+        File tempSS = tempSSTableFile("Keyspace1", "Standard1");
+        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
+        SSTableWriter writer = new SSTableWriter(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
 
         // Add rowA
         cfamily.addColumn(Util.cellname("colName"), ByteBufferUtil.bytes("val"), System.currentTimeMillis());
@@ -303,7 +272,8 @@ public class SSTableExportTest
         SSTableReader reader = writer.closeAndOpenReader();
         // Export to JSON and verify
         File tempJson = File.createTempFile("CFWithDeletionInfo", ".json");
-        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[0]);
+        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[0],
+                CFMetaData.sparseCFMetaData("Keyspace1", "Counter1", BytesType.instance));
 
         JSONArray json = (JSONArray)JSONValue.parseWithException(new FileReader(tempJson));
         assertEquals("unexpected number of rows", 1, json.size());
@@ -328,8 +298,8 @@ public class SSTableExportTest
 
         assertEquals(
                 "unexpected serialization format for topLevelDeletion",
-                JSONValue.parse("{\"markedForDeleteAt\":0,\"localDeletionTime\":0}"),
-                serializedDeletionInfo);
+                "{\"markedForDeleteAt\":0,\"localDeletionTime\":0}",
+                serializedDeletionInfo.toJSONString());
 
         // check the colums are what we put in
         JSONArray cols = (JSONArray) row.get("cells");
@@ -351,9 +321,9 @@ public class SSTableExportTest
     @Test
     public void testColumnNameEqualToDefaultKeyAlias() throws IOException, ParseException
     {
-        File tempSS = tempSSTableFile(KEYSPACE1, "UUIDKeys");
-        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create(KEYSPACE1, "UUIDKeys");
-        SSTableWriter writer = SSTableWriter.create(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
+        File tempSS = tempSSTableFile("Keyspace1", "UUIDKeys");
+        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create("Keyspace1", "UUIDKeys");
+        SSTableWriter writer = new SSTableWriter(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
 
         // Add a row
         cfamily.addColumn(column(CFMetaData.DEFAULT_KEY_ALIAS, "not a uuid", 1L));
@@ -362,7 +332,8 @@ public class SSTableExportTest
         SSTableReader reader = writer.closeAndOpenReader();
         // Export to JSON and verify
         File tempJson = File.createTempFile("CFWithColumnNameEqualToDefaultKeyAlias", ".json");
-        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[0]);
+        SSTableExport.export(reader, new PrintStream(tempJson.getPath()), new String[0],
+                CFMetaData.sparseCFMetaData("Keyspace1", "UUIDKeys", BytesType.instance));
 
         JSONArray json = (JSONArray)JSONValue.parseWithException(new FileReader(tempJson));
         assertEquals(1, json.size());
@@ -380,9 +351,9 @@ public class SSTableExportTest
     @Test
     public void testAsciiKeyValidator() throws IOException, ParseException
     {
-        File tempSS = tempSSTableFile(KEYSPACE1, "AsciiKeys");
-        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create(KEYSPACE1, "AsciiKeys");
-        SSTableWriter writer = SSTableWriter.create(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE, 0);
+        File tempSS = tempSSTableFile("Keyspace1", "AsciiKeys");
+        ColumnFamily cfamily = ArrayBackedSortedColumns.factory.create("Keyspace1", "AsciiKeys");
+        SSTableWriter writer = new SSTableWriter(tempSS.getPath(), 2, ActiveRepairService.UNREPAIRED_SSTABLE);
 
         // Add a row
         cfamily.addColumn(column("column", "value", 1L));
@@ -393,7 +364,8 @@ public class SSTableExportTest
         File tempJson = File.createTempFile("CFWithAsciiKeys", ".json");
         SSTableExport.export(reader,
                              new PrintStream(tempJson.getPath()),
-                             new String[0]);
+                             new String[0],
+                             CFMetaData.sparseCFMetaData("Keyspace1", "AsciiKeys", BytesType.instance));
 
         JSONArray json = (JSONArray)JSONValue.parseWithException(new FileReader(tempJson));
         assertEquals(1, json.size());

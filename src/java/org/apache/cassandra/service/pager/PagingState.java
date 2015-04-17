@@ -65,7 +65,7 @@ public class PagingState
             ByteBufferUtil.writeWithShortLength(partitionKey, out);
             ByteBufferUtil.writeWithShortLength(cellName, out);
             out.writeInt(remaining);
-            return out.buffer();
+            return out.asByteBuffer();
         }
         catch (IOException e)
         {

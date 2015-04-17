@@ -60,14 +60,3 @@ Copyright 2010, Cedric Beust cedric@beust.com
 
 HLL++ support provided by stream-lib
 (https://github.com/addthis/stream-lib)
-
-Javassist
-(http://www.csg.ci.i.u-tokyo.ac.jp/~chiba/javassist/)
-
-SIGAR
-http://sigar.hyperic.com/
-
-OHC
-(https://github.com/snazy/ohc)
-Java Off-Heap-Cache, licensed under APLv2
-Copyright 2014-2015 Robert Stupp, Germany.

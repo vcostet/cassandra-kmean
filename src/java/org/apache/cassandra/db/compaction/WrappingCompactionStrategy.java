@@ -32,8 +32,8 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -78,7 +78,7 @@ public final class WrappingCompactionStrategy extends AbstractCompactionStrategy
     }
 
     @Override
-    public Collection<AbstractCompactionTask> getMaximalTask(final int gcBefore, final boolean splitOutput)
+    public Collection<AbstractCompactionTask> getMaximalTask(final int gcBefore)
     {
         // runWithCompactionsDisabled cancels active compactions and disables them, then we are able
         // to make the repaired/unrepaired strategies mark their own sstables as compacting. Once the
@@ -90,8 +90,8 @@ public final class WrappingCompactionStrategy extends AbstractCompactionStrategy
             {
                 synchronized (WrappingCompactionStrategy.this)
                 {
-                    Collection<AbstractCompactionTask> repairedTasks = repaired.getMaximalTask(gcBefore, splitOutput);
-                    Collection<AbstractCompactionTask> unrepairedTasks = unrepaired.getMaximalTask(gcBefore, splitOutput);
+                    Collection<AbstractCompactionTask> repairedTasks = repaired.getMaximalTask(gcBefore);
+                    Collection<AbstractCompactionTask> unrepairedTasks = unrepaired.getMaximalTask(gcBefore);
 
                     if (repairedTasks == null && unrepairedTasks == null)
                         return null;
@@ -359,11 +359,6 @@ public final class WrappingCompactionStrategy extends AbstractCompactionStrategy
         scanners.addAll(repairedScanners.scanners);
         scanners.addAll(unrepairedScanners.scanners);
         return new ScannerList(scanners);
-    }
-
-    public Collection<Collection<SSTableReader>> groupSSTablesForAntiCompaction(Collection<SSTableReader> sstablesToGroup)
-    {
-        return unrepaired.groupSSTablesForAntiCompaction(sstablesToGroup);
     }
 
     public List<AbstractCompactionStrategy> getWrappedStrategies()

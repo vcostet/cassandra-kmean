@@ -57,7 +57,7 @@ public abstract class AbstractMarker extends Term.NonTerminal
             this.bindIndex = bindIndex;
         }
 
-        public NonTerminal prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
+        public AbstractMarker prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
             if (!(receiver.type instanceof CollectionType))
                 return new Constants.Marker(bindIndex, receiver);
@@ -71,9 +71,9 @@ public abstract class AbstractMarker extends Term.NonTerminal
             throw new AssertionError();
         }
 
-        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
-            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+            return true;
         }
 
         @Override

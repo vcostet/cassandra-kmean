@@ -83,7 +83,7 @@ public class ColumnStats
             }
             else
             {
-                if (value < this.value)
+                if (value <this.value)
                     this.value = value;
             }
         }
@@ -149,7 +149,7 @@ public class ColumnStats
             }
             else
             {
-                if (value > this.value)
+                if (value >this.value)
                     this.value = value;
             }
         }

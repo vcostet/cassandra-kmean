@@ -35,11 +35,8 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.filter.ColumnSlice;
-import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.utils.*;
-import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
-import org.apache.cassandra.utils.btree.BTreeSearchIterator;
 import org.apache.cassandra.utils.btree.UpdateFunction;
 import org.apache.cassandra.utils.concurrent.Locks;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -55,13 +52,12 @@ import static org.apache.cassandra.db.index.SecondaryIndexManager.Updater;
  * isolated (in the sense of ACID). Typically a addAll is guaranteed that no
  * other thread can see the state where only parts but not all columns have
  * been added.
- * <p>
+ * <p/>
  * WARNING: removing element through getSortedColumns().iterator() is *not* supported
- * </p>
  */
 public class AtomicBTreeColumns extends ColumnFamily
 {
-    static final long EMPTY_SIZE = ObjectSizes.measure(new AtomicBTreeColumns(CFMetaData.denseCFMetaData("keyspace", "table", BytesType.instance), null))
+    static final long EMPTY_SIZE = ObjectSizes.measure(new AtomicBTreeColumns(CFMetaData.IndexCf, null))
             + ObjectSizes.measure(new Holder(null, null));
 
     // Reserved values for wasteTracker field. These values must not be consecutive (see avoidReservedValues)
@@ -150,11 +146,6 @@ public class AtomicBTreeColumns extends ColumnFamily
     protected void delete(RangeTombstone tombstone)
     {
         delete(new DeletionInfo(tombstone, getComparator()));
-    }
-
-    public SearchIterator<CellName, Cell> searchIterator()
-    {
-        return new BTreeSearchIterator<>(ref.tree, asymmetricComparator());
     }
 
     public void delete(DeletionInfo info)

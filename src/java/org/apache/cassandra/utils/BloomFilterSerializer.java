@@ -27,7 +27,7 @@ import org.apache.cassandra.utils.obs.IBitSet;
 import org.apache.cassandra.utils.obs.OffHeapBitSet;
 import org.apache.cassandra.utils.obs.OpenBitSet;
 
-class BloomFilterSerializer implements ISerializer<BloomFilter>
+abstract class BloomFilterSerializer implements ISerializer<BloomFilter>
 {
     public void serialize(BloomFilter bf, DataOutputPlus out) throws IOException
     {
@@ -47,10 +47,7 @@ class BloomFilterSerializer implements ISerializer<BloomFilter>
         return createFilter(hashes, bs);
     }
 
-    BloomFilter createFilter(int hashes, IBitSet bs)
-    {
-        return new BloomFilter(hashes, bs);
-    }
+    protected abstract BloomFilter createFilter(int hashes, IBitSet bs);
 
     /**
      * Calculates a serialized size of the given Bloom Filter

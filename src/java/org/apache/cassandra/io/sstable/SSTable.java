@@ -151,17 +151,18 @@ public abstract class SSTable
     }
 
     /**
-     * @return Descriptor and Component pair. null if given file is not acceptable as SSTable component.
-     *         If component is of unknown type, returns CUSTOM component.
+     * @return A Descriptor,Component pair. If component is of unknown type, returns CUSTOM component.
      */
-    public static Pair<Descriptor, Component> tryComponentFromFilename(File dir, String name)
+    public static Pair<Descriptor,Component> tryComponentFromFilename(File dir, String name)
     {
         try
         {
             return Component.fromFilename(dir, name);
         }
-        catch (Throwable e)
+        catch (NoSuchElementException e)
         {
+            // A NoSuchElementException is thrown if the name does not match the Descriptor format
+            // This is the less impacting change (all calls to this method test for null return)
             return null;
         }
     }
@@ -209,7 +210,7 @@ public abstract class SSTable
     }
 
     /** @return An estimate of the number of keys contained in the given index file. */
-    protected long estimateRowsFromIndex(RandomAccessReader ifile) throws IOException
+    long estimateRowsFromIndex(RandomAccessReader ifile) throws IOException
     {
         // collect sizes for the first 10000 keys, or first 10 megabytes of data
         final int SAMPLES_CAP = 10000, BYTES_CAP = (int)Math.min(10000000, ifile.length());

@@ -55,7 +55,6 @@ public class CompressedRandomAccessReaderTest
         testResetAndTruncate(File.createTempFile("compressed", "1"), true, 10);
         testResetAndTruncate(File.createTempFile("compressed", "2"), true, CompressionParameters.DEFAULT_CHUNK_LENGTH);
     }
-
     @Test
     public void test6791() throws IOException, ConfigurationException
     {
@@ -81,7 +80,7 @@ public class CompressedRandomAccessReaderTest
                 writer.write("x".getBytes());
             writer.close();
 
-            CompressedRandomAccessReader reader = CompressedRandomAccessReader.open(filename, new CompressionMetadata(filename + ".metadata", f.length()));
+            CompressedRandomAccessReader reader = CompressedRandomAccessReader.open(filename, new CompressionMetadata(filename + ".metadata", f.length(), true));
             String res = reader.readLine();
             assertEquals(res, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
             assertEquals(40, res.length());
@@ -106,7 +105,7 @@ public class CompressedRandomAccessReaderTest
             MetadataCollector sstableMetadataCollector = new MetadataCollector(new SimpleDenseCellNameType(BytesType.instance)).replayPosition(null);
             SequentialWriter writer = compressed
                 ? new CompressedSequentialWriter(f, filename + ".metadata", new CompressionParameters(SnappyCompressor.instance), sstableMetadataCollector)
-                : new SequentialWriter(f, CompressionParameters.DEFAULT_CHUNK_LENGTH, false);
+                : new SequentialWriter(f, CompressionParameters.DEFAULT_CHUNK_LENGTH);
 
             writer.write("The quick ".getBytes());
             FileMark mark = writer.mark();
@@ -124,7 +123,7 @@ public class CompressedRandomAccessReaderTest
 
             assert f.exists();
             RandomAccessReader reader = compressed
-                                      ? CompressedRandomAccessReader.open(filename, new CompressionMetadata(filename + ".metadata", f.length()))
+                                      ? CompressedRandomAccessReader.open(filename, new CompressionMetadata(filename + ".metadata", f.length(), true))
                                       : RandomAccessReader.open(f);
             String expected = "The quick brown fox jumps over the lazy dog";
             assertEquals(expected.length(), reader.length());
@@ -161,7 +160,7 @@ public class CompressedRandomAccessReaderTest
         writer.close();
 
         // open compression metadata and get chunk information
-        CompressionMetadata meta = new CompressionMetadata(metadata.getPath(), file.length());
+        CompressionMetadata meta = new CompressionMetadata(metadata.getPath(), file.length(), true);
         CompressionMetadata.Chunk chunk = meta.chunkFor(0);
 
         RandomAccessReader reader = CompressedRandomAccessReader.open(file.getPath(), meta);

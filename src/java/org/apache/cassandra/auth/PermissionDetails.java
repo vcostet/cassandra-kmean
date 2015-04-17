@@ -26,13 +26,13 @@ import com.google.common.collect.ComparisonChain;
  */
 public class PermissionDetails implements Comparable<PermissionDetails>
 {
-    public final String grantee;
+    public final String username;
     public final IResource resource;
     public final Permission permission;
 
-    public PermissionDetails(String grantee, IResource resource, Permission permission)
+    public PermissionDetails(String username, IResource resource, Permission permission)
     {
-        this.grantee = grantee;
+        this.username = username;
         this.resource = resource;
         this.permission = permission;
     }
@@ -41,7 +41,7 @@ public class PermissionDetails implements Comparable<PermissionDetails>
     public int compareTo(PermissionDetails other)
     {
         return ComparisonChain.start()
-                              .compare(grantee, other.grantee)
+                              .compare(username, other.username)
                               .compare(resource.getName(), other.resource.getName())
                               .compare(permission, other.permission)
                               .result();
@@ -50,8 +50,8 @@ public class PermissionDetails implements Comparable<PermissionDetails>
     @Override
     public String toString()
     {
-        return String.format("<PermissionDetails grantee:%s resource:%s permission:%s>",
-                             grantee,
+        return String.format("<PermissionDetails username:%s resource:%s permission:%s>",
+                             username,
                              resource.getName(),
                              permission);
     }
@@ -66,7 +66,7 @@ public class PermissionDetails implements Comparable<PermissionDetails>
             return false;
 
         PermissionDetails pd = (PermissionDetails) o;
-        return Objects.equal(grantee, pd.grantee)
+        return Objects.equal(username, pd.username)
             && Objects.equal(resource, pd.resource)
             && Objects.equal(permission, pd.permission);
     }
@@ -74,6 +74,6 @@ public class PermissionDetails implements Comparable<PermissionDetails>
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(grantee, resource, permission);
+        return Objects.hashCode(username, resource, permission);
     }
 }

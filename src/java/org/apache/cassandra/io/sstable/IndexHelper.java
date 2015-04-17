@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.sstable;
 
 import java.io.*;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -28,6 +29,7 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.FileMark;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.*;
 
@@ -62,6 +64,32 @@ public class IndexHelper
             byte[] skip = new byte[columnIndexSize];
             in.readFully(skip);
         }
+    }
+
+    /**
+     * Deserialize the index into a structure and return it
+     *
+     * @param in input source
+     * @param type the comparator type for the column family
+     *
+     * @return ArrayList<IndexInfo> - list of de-serialized indexes
+     * @throws IOException if an I/O error occurs.
+     */
+    public static List<IndexInfo> deserializeIndex(FileDataInput in, CType type) throws IOException
+    {
+        int columnIndexSize = in.readInt();
+        if (columnIndexSize == 0)
+            return Collections.<IndexInfo>emptyList();
+        ArrayList<IndexInfo> indexList = new ArrayList<IndexInfo>();
+        FileMark mark = in.mark();
+        ISerializer<IndexInfo> serializer = type.indexSerializer();
+        while (in.bytesPastMark(mark) < columnIndexSize)
+        {
+            indexList.add(serializer.deserialize(in));
+        }
+        assert in.bytesPastMark(mark) == columnIndexSize;
+
+        return indexList;
     }
 
     /**

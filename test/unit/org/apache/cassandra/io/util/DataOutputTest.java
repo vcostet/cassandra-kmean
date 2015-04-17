@@ -36,37 +36,28 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import org.junit.Assert;
 import org.junit.Test;
+
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class DataOutputTest
 {
+
     @Test
-    public void testWrappedDataOutputStreamPlus() throws IOException
+    public void testDataOutputStreamPlus() throws IOException
     {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        DataOutputStreamPlus write = new WrappedDataOutputStreamPlus(bos);
+        DataOutputStreamPlus write = new DataOutputStreamPlus(bos);
         DataInput canon = testWrite(write);
         DataInput test = new DataInputStream(new ByteArrayInputStream(bos.toByteArray()));
         testRead(test, canon);
     }
 
     @Test
-    public void testWrappedDataOutputChannelAndChannel() throws IOException
+    public void testDataOutputChannelAndChannel() throws IOException
     {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        DataOutputStreamPlus write = new WrappedDataOutputStreamPlus(bos);
+        DataOutputStreamPlus write = new DataOutputStreamAndChannel(Channels.newChannel(bos));
         DataInput canon = testWrite(write);
-        DataInput test = new DataInputStream(new ByteArrayInputStream(bos.toByteArray()));
-        testRead(test, canon);
-    }
-
-    @Test
-    public void testBufferedDataOutputStreamPlusAndChannel() throws IOException
-    {
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        DataOutputStreamPlus write = new BufferedDataOutputStreamPlus(Channels.newChannel(bos));
-        DataInput canon = testWrite(write);
-        write.close();
         DataInput test = new DataInputStream(new ByteArrayInputStream(bos.toByteArray()));
         testRead(test, canon);
     }
@@ -84,7 +75,7 @@ public class DataOutputTest
     public void testDataOutputDirectByteBuffer() throws IOException
     {
         ByteBuffer buf = wrap(new byte[345], true);
-        BufferedDataOutputStreamPlus write = new BufferedDataOutputStreamPlus(null, buf.duplicate());
+        DataOutputByteBuffer write = new DataOutputByteBuffer(buf.duplicate());
         DataInput canon = testWrite(write);
         DataInput test = new DataInputStream(new ByteArrayInputStream(ByteBufferUtil.getArray(buf)));
         testRead(test, canon);
@@ -94,7 +85,7 @@ public class DataOutputTest
     public void testDataOutputHeapByteBuffer() throws IOException
     {
         ByteBuffer buf = wrap(new byte[345], false);
-        BufferedDataOutputStreamPlus write = new BufferedDataOutputStreamPlus(null, buf.duplicate());
+        DataOutputByteBuffer write = new DataOutputByteBuffer(buf.duplicate());
         DataInput canon = testWrite(write);
         DataInput test = new DataInputStream(new ByteArrayInputStream(ByteBufferUtil.getArray(buf)));
         testRead(test, canon);
@@ -112,31 +103,12 @@ public class DataOutputTest
     }
 
     @Test
-    public void testWrappedFileOutputStream() throws IOException
-    {
-        File file = FileUtils.createTempFile("dataoutput", "test");
-        try
-        {
-            DataOutputStreamPlus write = new WrappedDataOutputStreamPlus(new FileOutputStream(file));
-            DataInput canon = testWrite(write);
-            write.close();
-            DataInputStream test = new DataInputStream(new FileInputStream(file));
-            testRead(test, canon);
-            test.close();
-        }
-        finally
-        {
-            Assert.assertTrue(file.delete());
-        }
-    }
-
-    @Test
     public void testFileOutputStream() throws IOException
     {
         File file = FileUtils.createTempFile("dataoutput", "test");
         try
         {
-            DataOutputStreamPlus write = new BufferedDataOutputStreamPlus(new FileOutputStream(file));
+            DataOutputStreamAndChannel write = new DataOutputStreamAndChannel(new FileOutputStream(file));
             DataInput canon = testWrite(write);
             write.close();
             DataInputStream test = new DataInputStream(new FileInputStream(file));
@@ -155,9 +127,8 @@ public class DataOutputTest
         File file = FileUtils.createTempFile("dataoutput", "test");
         try
         {
-            @SuppressWarnings("resource")
             final RandomAccessFile raf = new RandomAccessFile(file, "rw");
-            DataOutputStreamPlus write = new BufferedDataOutputStreamPlus(raf.getChannel());
+            DataOutputStreamAndChannel write = new DataOutputStreamAndChannel(Channels.newOutputStream(raf.getChannel()), raf.getChannel());
             DataInput canon = testWrite(write);
             write.close();
             DataInputStream test = new DataInputStream(new FileInputStream(file));
@@ -174,8 +145,8 @@ public class DataOutputTest
     public void testSequentialWriter() throws IOException
     {
         File file = FileUtils.createTempFile("dataoutput", "test");
-        final SequentialWriter writer = new SequentialWriter(file, 32, false);
-        DataOutputStreamPlus write = new WrappedDataOutputStreamPlus(writer);
+        final SequentialWriter writer = new SequentialWriter(file, 32);
+        DataOutputStreamAndChannel write = new DataOutputStreamAndChannel(writer, writer);
         DataInput canon = testWrite(write);
         write.flush();
         write.close();
@@ -191,33 +162,32 @@ public class DataOutputTest
         final DataOutput canon = new DataOutputStream(bos);
         Random rnd = ThreadLocalRandom.current();
 
-        int size = 50;
-        byte[] bytes = new byte[size];
+        byte[] bytes = new byte[50];
         rnd.nextBytes(bytes);
         ByteBufferUtil.writeWithLength(bytes, test);
         ByteBufferUtil.writeWithLength(bytes, canon);
 
-        bytes = new byte[size];
+        bytes = new byte[50];
         rnd.nextBytes(bytes);
         ByteBufferUtil.writeWithLength(wrap(bytes, false), test);
         ByteBufferUtil.writeWithLength(bytes, canon);
 
-        bytes = new byte[size];
+        bytes = new byte[50];
         rnd.nextBytes(bytes);
         ByteBufferUtil.writeWithLength(wrap(bytes, true), test);
         ByteBufferUtil.writeWithLength(bytes, canon);
 
-        bytes = new byte[size];
+        bytes = new byte[50];
         rnd.nextBytes(bytes);
         ByteBufferUtil.writeWithShortLength(bytes, test);
         ByteBufferUtil.writeWithShortLength(bytes, canon);
 
-        bytes = new byte[size];
+        bytes = new byte[50];
         rnd.nextBytes(bytes);
         ByteBufferUtil.writeWithShortLength(wrap(bytes, false), test);
         ByteBufferUtil.writeWithShortLength(bytes, canon);
 
-        bytes = new byte[size];
+        bytes = new byte[50];
         rnd.nextBytes(bytes);
         ByteBufferUtil.writeWithShortLength(wrap(bytes, true), test);
         ByteBufferUtil.writeWithShortLength(bytes, canon);
@@ -277,9 +247,8 @@ public class DataOutputTest
             test.readInt();
             assert false;
         }
-        catch (EOFException ignore)
+        catch (EOFException _)
         {
-            // it worked
         }
     }
 

@@ -224,7 +224,7 @@ public class CassandraStorage extends AbstractCassandraStorage
             Tuple tuple = keyToTuple(key, cfDef, parseType(cfDef.getKey_validation_class()));
             DefaultDataBag bag = new DefaultDataBag();
             // we must add all the indexed columns first to match the schema
-            Map<ByteBuffer, Boolean> added = new HashMap<ByteBuffer, Boolean>(cfDef.column_metadata.size());
+            Map<ByteBuffer, Boolean> added = new HashMap<ByteBuffer, Boolean>();
             // take care to iterate these in the same order as the schema does
             for (ColumnDef cdef : cfDef.column_metadata)
             {
@@ -810,7 +810,7 @@ public class CassandraStorage extends AbstractCassandraStorage
         }
         catch (Exception e)
         {
-            throw new IOException("Expected 'cassandra://[username:password@]<keyspace>/<table>" +
+            throw new IOException("Expected 'cassandra://[username:password@]<keyspace>/<columnfamily>" +
                     "[?slice_start=<start>&slice_end=<end>[&reversed=true][&limit=1]" +
                     "[&allow_deletes=true][&widerows=true][&use_secondary=true]" +
                     "[&comparator=<comparator>][&split_size=<size>][&partitioner=<partitioner>]" +

@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.IOException;
 import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.TreeMap;
@@ -70,11 +69,11 @@ public class IndexSummaryBuilder implements AutoCloseable
      */
     public static class ReadableBoundary
     {
-        public final DecoratedKey lastKey;
-        public final long indexLength;
-        public final long dataLength;
-        public final int summaryCount;
-        public final long entriesLength;
+        final DecoratedKey lastKey;
+        final long indexLength;
+        final long dataLength;
+        final int summaryCount;
+        final long entriesLength;
         public ReadableBoundary(DecoratedKey lastKey, long indexLength, long dataLength, int summaryCount, long entriesLength)
         {
             this.lastKey = lastKey;
@@ -108,8 +107,8 @@ public class IndexSummaryBuilder implements AutoCloseable
 
         // for initializing data structures, adjust our estimates based on the sampling level
         maxExpectedEntries = Math.max(1, (maxExpectedEntries * samplingLevel) / BASE_SAMPLING_LEVEL);
-        offsets = new SafeMemoryWriter(4 * maxExpectedEntries).order(ByteOrder.nativeOrder());
-        entries = new SafeMemoryWriter(40 * maxExpectedEntries).order(ByteOrder.nativeOrder());
+        offsets = new SafeMemoryWriter(4 * maxExpectedEntries).withByteOrder(ByteOrder.nativeOrder());
+        entries = new SafeMemoryWriter(40 * maxExpectedEntries).withByteOrder(ByteOrder.nativeOrder());
 
         // the summary will always contain the first index entry (downsampling will never remove it)
         nextSamplePosition = 0;
@@ -152,7 +151,7 @@ public class IndexSummaryBuilder implements AutoCloseable
         return lastReadableBoundary;
     }
 
-    public IndexSummaryBuilder maybeAddEntry(DecoratedKey decoratedKey, long indexStart) throws IOException
+    public IndexSummaryBuilder maybeAddEntry(DecoratedKey decoratedKey, long indexStart)
     {
         return maybeAddEntry(decoratedKey, indexStart, 0, 0);
     }
@@ -165,7 +164,7 @@ public class IndexSummaryBuilder implements AutoCloseable
      * @param dataEnd the position in the data file we need to be able to read to (exclusive) to read this record
      *                a value of 0 indicates we are not tracking readable boundaries
      */
-    public IndexSummaryBuilder maybeAddEntry(DecoratedKey decoratedKey, long indexStart, long indexEnd, long dataEnd) throws IOException
+    public IndexSummaryBuilder maybeAddEntry(DecoratedKey decoratedKey, long indexStart, long indexEnd, long dataEnd)
     {
         if (keysWritten == nextSamplePosition)
         {

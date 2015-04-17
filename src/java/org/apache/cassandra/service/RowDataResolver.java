@@ -41,9 +41,9 @@ public class RowDataResolver extends AbstractRowResolver
     private final IDiskAtomFilter filter;
     private final long timestamp;
 
-    public RowDataResolver(String keyspaceName, ByteBuffer key, IDiskAtomFilter qFilter, long timestamp, int maxResponseCount)
+    public RowDataResolver(String keyspaceName, ByteBuffer key, IDiskAtomFilter qFilter, long timestamp)
     {
-        super(key, keyspaceName, maxResponseCount);
+        super(key, keyspaceName);
         this.filter = qFilter;
         this.timestamp = timestamp;
     }
@@ -93,7 +93,7 @@ public class RowDataResolver extends AbstractRowResolver
         }
         else
         {
-            resolved = replies.get(0).payload.row().cf;
+            resolved = replies.iterator().next().payload.row().cf;
         }
 
         if (logger.isDebugEnabled())
@@ -160,7 +160,7 @@ public class RowDataResolver extends AbstractRowResolver
     public Row getData()
     {
         assert !replies.isEmpty();
-        return replies.get(0).payload.row();
+        return replies.peek().payload.row();
     }
 
     public boolean isDataPresent()

@@ -125,7 +125,7 @@ public class Mutation implements IMutation
         ColumnFamily prev = modifications.put(columnFamily.id(), columnFamily);
         if (prev != null)
             // developer error
-            throw new IllegalArgumentException("Table " + columnFamily + " already has modifications in this mutation: " + prev);
+            throw new IllegalArgumentException("ColumnFamily " + columnFamily + " already has modifications in this mutation: " + prev);
     }
 
     /**
@@ -305,7 +305,7 @@ public class Mutation implements IMutation
             }
             else
             {
-                modifications = new HashMap<UUID, ColumnFamily>(size);
+                modifications = new HashMap<UUID, ColumnFamily>();
                 for (int i = 0; i < size; ++i)
                 {
                     ColumnFamily cf = deserializeOneCf(in, version, flag);

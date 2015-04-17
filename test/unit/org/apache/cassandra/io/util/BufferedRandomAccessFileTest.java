@@ -33,6 +33,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.cassandra.Util.expectEOF;
 import static org.apache.cassandra.Util.expectException;
@@ -530,6 +531,7 @@ public class BufferedRandomAccessFileTest
         //see https://issues.apache.org/jira/browse/CASSANDRA-7756
 
         final FileCacheService.CacheKey cacheKey = new FileCacheService.CacheKey();
+
         final int THREAD_COUNT = 40;
         ExecutorService executorService = Executors.newFixedThreadPool(THREAD_COUNT);
 
@@ -617,6 +619,34 @@ public class BufferedRandomAccessFileTest
             }
         }, IllegalArgumentException.class);
 
+        // Any write() call should fail
+        expectException(new Callable<Object>()
+        {
+            public Object call() throws IOException
+            {
+                copy.write(1);
+                return null;
+            }
+        }, UnsupportedOperationException.class);
+
+        expectException(new Callable<Object>()
+        {
+            public Object call() throws IOException
+            {
+                copy.write(new byte[1]);
+                return null;
+            }
+        }, UnsupportedOperationException.class);
+
+        expectException(new Callable<Object>()
+        {
+            public Object call() throws IOException
+            {
+                copy.write(new byte[3], 0, 2);
+                return null;
+            }
+        }, UnsupportedOperationException.class);
+
         copy.seek(0);
         copy.skipBytes(5);
 
@@ -658,6 +688,16 @@ public class BufferedRandomAccessFileTest
         try (SequentialWriter file = SequentialWriter.open(tmpFile))
         {
             file.truncate(-8L);
+        }
+    }
+
+    @Test (expected=IOException.class)
+    public void testSetLengthDuringReadMode() throws IOException
+    {
+        File tmpFile = File.createTempFile("set_length_during_read_mode", "bin");
+        try (RandomAccessReader file = RandomAccessReader.open(tmpFile))
+        {
+            file.setLength(4L);
         }
     }
 

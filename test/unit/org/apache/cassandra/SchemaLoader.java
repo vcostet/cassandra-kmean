@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +58,11 @@ public class SchemaLoader
         // Migrations aren't happy if gossiper is not started.  Even if we don't use migrations though,
         // some tests now expect us to start gossip for them.
         startGossiper();
+
+        // if you're messing with low-level sstable stuff, it can be useful to inject the schema directly
+        // Schema.instance.load(schemaDefinition());
+        for (KSMetaData ksm : schemaDefinition())
+            MigrationManager.announceNewKeyspace(ksm);
     }
 
     @After
@@ -88,27 +94,32 @@ public class SchemaLoader
 
     public static void startGossiper()
     {
-        if (!Gossiper.instance.isEnabled())
-            Gossiper.instance.start((int) (System.currentTimeMillis() / 1000));
+        Gossiper.instance.start((int) (System.currentTimeMillis() / 1000));
     }
 
-    public static void schemaDefinition(String testName) throws ConfigurationException
+    @AfterClass
+    public static void stopGossiper()
+    {
+        Gossiper.instance.stop();
+    }
+
+    public static Collection<KSMetaData> schemaDefinition() throws ConfigurationException
     {
         List<KSMetaData> schema = new ArrayList<KSMetaData>();
 
         // A whole bucket of shorthand
-        String ks1 = testName + "Keyspace1";
-        String ks2 = testName + "Keyspace2";
-        String ks3 = testName + "Keyspace3";
-        String ks4 = testName + "Keyspace4";
-        String ks5 = testName + "Keyspace5";
-        String ks6 = testName + "Keyspace6";
-        String ks_kcs = testName + "KeyCacheSpace";
-        String ks_rcs = testName + "RowCacheSpace";
-        String ks_ccs = testName + "CounterCacheSpace";
-        String ks_nocommit = testName + "NoCommitlogSpace";
-        String ks_prsi = testName + "PerRowSecondaryIndex";
-        String ks_cql = testName + "cql_keyspace";
+        String ks1 = "Keyspace1";
+        String ks2 = "Keyspace2";
+        String ks3 = "Keyspace3";
+        String ks4 = "Keyspace4";
+        String ks5 = "Keyspace5";
+        String ks6 = "Keyspace6";
+        String ks_kcs = "KeyCacheSpace";
+        String ks_rcs = "RowCacheSpace";
+        String ks_ccs = "CounterCacheSpace";
+        String ks_nocommit = "NoCommitlogSpace";
+        String ks_prsi = "PerRowSecondaryIndex";
+        String ks_cql = "cql_keyspace";
 
         Class<? extends AbstractReplicationStrategy> simple = SimpleStrategy.class;
 
@@ -178,6 +189,9 @@ public class SchemaLoader
                                            standardCFMD(ks1, "StandardLowIndexInterval").minIndexInterval(8)
                                                                                         .maxIndexInterval(256)
                                                                                         .caching(CachingOptions.NONE),
+                                           standardCFMD(ks1, "StandardRace").minIndexInterval(8)
+                                                                            .maxIndexInterval(256)
+                                                                            .caching(CachingOptions.NONE),
                                            standardCFMD(ks1, "UUIDKeys").keyValidator(UUIDType.instance),
                                            CFMetaData.denseCFMetaData(ks1, "MixedTypes", LongType.instance).keyValidator(UUIDType.instance).defaultValidator(BooleanType.instance),
                                            CFMetaData.denseCFMetaData(ks1, "MixedTypesComposite", composite).keyValidator(composite).defaultValidator(BooleanType.instance),
@@ -307,33 +321,10 @@ public class SchemaLoader
         if (Boolean.parseBoolean(System.getProperty("cassandra.test.compression", "false")))
             useCompression(schema);
 
-        // if you're messing with low-level sstable stuff, it can be useful to inject the schema directly
-        // Schema.instance.load(schemaDefinition());
-        for (KSMetaData ksm : schema)
-            MigrationManager.announceNewKeyspace(ksm, false);
+        return schema;
     }
 
-    public static void createKeyspace(String keyspaceName,
-                                      Class<? extends AbstractReplicationStrategy> strategy,
-                                      Map<String, String> options,
-                                      CFMetaData... cfmetas) throws ConfigurationException
-    {
-        createKeyspace(keyspaceName, true, true, strategy, options, cfmetas);
-    }
-
-    public static void createKeyspace(String keyspaceName,
-                                      boolean durable,
-                                      boolean announceLocally,
-                                      Class<? extends AbstractReplicationStrategy> strategy,
-                                      Map<String, String> options,
-                                      CFMetaData... cfmetas) throws ConfigurationException
-    {
-        KSMetaData ksm = durable ? KSMetaData.testMetadata(keyspaceName, strategy, options, cfmetas)
-                                 : KSMetaData.testMetadataNotDurable(keyspaceName, strategy, options, cfmetas);
-        MigrationManager.announceNewKeyspace(ksm, announceLocally);
-    }
-
-    public static ColumnDefinition integerColumn(String ksName, String cfName)
+    private static ColumnDefinition integerColumn(String ksName, String cfName)
     {
         return new ColumnDefinition(ksName,
                                     cfName,
@@ -359,7 +350,7 @@ public class SchemaLoader
                                     ColumnDefinition.Kind.REGULAR);
     }
 
-    public static CFMetaData perRowIndexedCFMD(String ksName, String cfName)
+    private static CFMetaData perRowIndexedCFMD(String ksName, String cfName)
     {
         final Map<String, String> indexOptions = Collections.singletonMap(
                                                       SecondaryIndex.CUSTOM_INDEX_OPTION_NAME,
@@ -383,19 +374,19 @@ public class SchemaLoader
         }
     }
 
-    public static CFMetaData standardCFMD(String ksName, String cfName)
+    private static CFMetaData standardCFMD(String ksName, String cfName)
     {
         return CFMetaData.denseCFMetaData(ksName, cfName, BytesType.instance);
     }
-    public static CFMetaData superCFMD(String ksName, String cfName, AbstractType subcc)
+    private static CFMetaData superCFMD(String ksName, String cfName, AbstractType subcc)
     {
         return superCFMD(ksName, cfName, BytesType.instance, subcc);
     }
-    public static CFMetaData superCFMD(String ksName, String cfName, AbstractType cc, AbstractType subcc)
+    private static CFMetaData superCFMD(String ksName, String cfName, AbstractType cc, AbstractType subcc)
     {
         return CFMetaData.denseCFMetaData(ksName, cfName, cc, subcc);
     }
-    public static CFMetaData indexCFMD(String ksName, String cfName, final Boolean withIdxType) throws ConfigurationException
+    private static CFMetaData indexCFMD(String ksName, String cfName, final Boolean withIdxType) throws ConfigurationException
     {
         CFMetaData cfm = CFMetaData.sparseCFMetaData(ksName, cfName, BytesType.instance).keyValidator(AsciiType.instance);
 
@@ -404,7 +395,7 @@ public class SchemaLoader
         return cfm.addColumnDefinition(ColumnDefinition.regularDef(cfm, cName, LongType.instance, null)
                                                        .setIndex(withIdxType ? ByteBufferUtil.bytesToHex(cName) : null, keys, null));
     }
-    public static CFMetaData compositeIndexCFMD(String ksName, String cfName, final Boolean withIdxType) throws ConfigurationException
+    private static CFMetaData compositeIndexCFMD(String ksName, String cfName, final Boolean withIdxType) throws ConfigurationException
     {
         final CompositeType composite = CompositeType.getInstance(Arrays.asList(new AbstractType<?>[]{UTF8Type.instance, UTF8Type.instance})); 
         CFMetaData cfm = CFMetaData.sparseCFMetaData(ksName, cfName, composite);
@@ -420,19 +411,17 @@ public class SchemaLoader
         return CFMetaData.denseCFMetaData(ksName, cfName, comp).defaultValidator(comp);
     }
 
-    public static CFMetaData jdbcSparseCFMD(String ksName, String cfName, AbstractType comp)
+    private static CFMetaData jdbcSparseCFMD(String ksName, String cfName, AbstractType comp)
     {
         return CFMetaData.sparseCFMetaData(ksName, cfName, comp).defaultValidator(comp);
     }
 
     public static void cleanupAndLeaveDirs()
     {
-        // We need to stop and unmap all CLS instances prior to cleanup() or we'll get failures on Windows.
-        CommitLog.instance.stopUnsafe(true);
         mkdirs();
         cleanup();
         mkdirs();
-        CommitLog.instance.startUnsafe();
+        CommitLog.instance.resetUnsafe(); // cleanup screws w/ CommitLog, this brings it back to safe state
     }
 
     public static void cleanup()
@@ -444,11 +433,7 @@ public class SchemaLoader
             File dir = new File(dirName);
             if (!dir.exists())
                 throw new RuntimeException("No such directory: " + dir.getAbsolutePath());
-
-            // Leave the folder around as Windows will complain about directory deletion w/handles open to children files
-            String[] children = dir.list();
-            for (String child : children)
-                FileUtils.deleteRecursive(new File(dir, child));
+            FileUtils.deleteRecursive(dir);
         }
 
         cleanupSavedCaches();
@@ -459,9 +444,7 @@ public class SchemaLoader
             File dir = new File(dirName);
             if (!dir.exists())
                 throw new RuntimeException("No such directory: " + dir.getAbsolutePath());
-            String[] children = dir.list();
-            for (String child : children)
-                FileUtils.deleteRecursive(new File(dir, child));
+            FileUtils.deleteRecursive(dir);
         }
     }
 
@@ -470,7 +453,7 @@ public class SchemaLoader
         DatabaseDescriptor.createAllDirectories();
     }
 
-    public static void insertData(String keyspace, String columnFamily, int offset, int numberOfRows)
+    protected void insertData(String keyspace, String columnFamily, int offset, int numberOfRows)
     {
         for (int i = offset; i < offset + numberOfRows; i++)
         {
@@ -482,7 +465,7 @@ public class SchemaLoader
     }
 
     /* usually used to populate the cache */
-    public static void readData(String keyspace, String columnFamily, int offset, int numberOfRows)
+    protected void readData(String keyspace, String columnFamily, int offset, int numberOfRows)
     {
         ColumnFamilyStore store = Keyspace.open(keyspace).getColumnFamilyStore(columnFamily);
         for (int i = offset; i < offset + numberOfRows; i++)
@@ -492,7 +475,7 @@ public class SchemaLoader
         }
     }
 
-    public static void cleanupSavedCaches()
+    protected static void cleanupSavedCaches()
     {
         File cachesDir = new File(DatabaseDescriptor.getSavedCachesLocation());
 

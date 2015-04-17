@@ -29,39 +29,39 @@ import java.util.Map;
 public interface MessagingServiceMBean
 {
     /**
-     * Pending tasks for large message TCP Connections
+     * Pending tasks for Command(Mutations, Read etc) TCP Connections
      */
-    public Map<String, Integer> getLargeMessagePendingTasks();
+    public Map<String, Integer> getCommandPendingTasks();
 
     /**
-     * Completed tasks for large message) TCP Connections
+     * Completed tasks for Command(Mutations, Read etc) TCP Connections
      */
-    public Map<String, Long> getLargeMessageCompletedTasks();
+    public Map<String, Long> getCommandCompletedTasks();
 
     /**
-     * Dropped tasks for large message TCP Connections
+     * Dropped tasks for Command(Mutations, Read etc) TCP Connections
      */
-    public Map<String, Long> getLargeMessageDroppedTasks();
+    public Map<String, Long> getCommandDroppedTasks();
 
     /**
-     * Pending tasks for small message TCP Connections
+     * Pending tasks for Response(GOSSIP & RESPONSE) TCP Connections
      */
-    public Map<String, Integer> getSmallMessagePendingTasks();
+    public Map<String, Integer> getResponsePendingTasks();
 
     /**
-     * Completed tasks for small message TCP Connections
+     * Completed tasks for Response(GOSSIP & RESPONSE) TCP Connections
      */
-    public Map<String, Long> getSmallMessageCompletedTasks();
-
-    /**
-     * Dropped tasks for small message TCP Connections
-     */
-    public Map<String, Long> getSmallMessageDroppedTasks();
+    public Map<String, Long> getResponseCompletedTasks();
 
     /**
      * dropped message counts for server lifetime
      */
     public Map<String, Integer> getDroppedMessages();
+
+    /**
+     * dropped message counts since last called
+     */
+    public Map<String, Integer> getRecentlyDroppedMessages();
 
     /**
      * Total number of timeouts happened on this node
@@ -72,6 +72,16 @@ public interface MessagingServiceMBean
      * Number of timeouts per host
      */
     public Map<String, Long> getTimeoutsPerHost();
+
+    /**
+     * Number of timeouts since last check.
+     */
+    public long getRecentTotalTimouts();
+
+    /**
+     * Number of timeouts since last check per host.
+     */
+    public Map<String, Long> getRecentTimeoutsPerHost();
 
     public int getVersion(String address) throws UnknownHostException;
 }

@@ -25,7 +25,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.thrift.ThriftConversion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class ColumnDefinitionTest
@@ -46,7 +45,7 @@ public class ColumnDefinitionTest
 
     protected void testSerializeDeserialize(CFMetaData cfm, ColumnDefinition cd) throws Exception
     {
-        ColumnDefinition newCd = ThriftConversion.fromThrift(cfm.ksName, cfm.cfName, cfm.comparator.asAbstractType(), null, ThriftConversion.toThrift(cd));
+        ColumnDefinition newCd = ColumnDefinition.fromThrift(cfm.ksName, cfm.cfName, cfm.comparator.asAbstractType(), null, cd.toThrift());
         Assert.assertNotSame(cd, newCd);
         Assert.assertEquals(cd.hashCode(), newCd.hashCode());
         Assert.assertEquals(cd, newCd);

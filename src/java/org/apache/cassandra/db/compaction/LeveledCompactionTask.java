@@ -17,34 +17,28 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import java.util.Set;
+import java.util.Collection;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
-import org.apache.cassandra.db.compaction.writers.MajorLeveledCompactionWriter;
-import org.apache.cassandra.db.compaction.writers.MaxSSTableSizeWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.SSTableReader;
+import org.apache.cassandra.io.sstable.SSTableWriter;
 
 public class LeveledCompactionTask extends CompactionTask
 {
     private final int level;
     private final long maxSSTableBytes;
-    private final boolean majorCompaction;
 
-    public LeveledCompactionTask(ColumnFamilyStore cfs, Iterable<SSTableReader> sstables, int level, final int gcBefore, long maxSSTableBytes, boolean majorCompaction)
+    public LeveledCompactionTask(ColumnFamilyStore cfs, Collection<SSTableReader> sstables, int level, final int gcBefore, long maxSSTableBytes)
     {
         super(cfs, sstables, gcBefore, false);
         this.level = level;
         this.maxSSTableBytes = maxSSTableBytes;
-        this.majorCompaction = majorCompaction;
     }
 
     @Override
-    public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Set<SSTableReader> allSSTables, Set<SSTableReader> nonExpiredSSTables)
+    protected boolean newSSTableSegmentThresholdReached(SSTableWriter writer)
     {
-        if (majorCompaction)
-            return new MajorLeveledCompactionWriter(cfs, sstables, nonExpiredSSTables, maxSSTableBytes, false, compactionType);
-        return new MaxSSTableSizeWriter(cfs, sstables, nonExpiredSSTables, maxSSTableBytes, getLevel(), false, compactionType);
+        return writer.getOnDiskFilePointer() > maxSSTableBytes;
     }
 
     @Override

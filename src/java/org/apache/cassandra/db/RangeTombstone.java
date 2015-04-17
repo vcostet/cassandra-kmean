@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.io.DataInput;
+import java.io.DataOutput;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.util.*;
@@ -26,7 +27,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.composites.CType;
 import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.io.ISSTableSerializer;
-import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.serializers.MarshalException;
@@ -69,16 +70,16 @@ public class RangeTombstone extends Interval<Composite, DeletionTime> implements
     {
         digest.update(min.toByteBuffer().duplicate());
         digest.update(max.toByteBuffer().duplicate());
-
-        try (DataOutputBuffer buffer = new DataOutputBuffer())
+        DataOutputBuffer buffer = new DataOutputBuffer();
+        try
         {
             buffer.writeLong(data.markedForDeleteAt);
-            digest.update(buffer.getData(), 0, buffer.getLength());
         }
         catch (IOException e)
         {
             throw new RuntimeException(e);
         }
+        digest.update(buffer.getData(), 0, buffer.getLength());
     }
 
     /**
@@ -259,7 +260,7 @@ public class RangeTombstone extends Interval<Composite, DeletionTime> implements
             DeletionTime.serializer.serialize(t.data, out);
         }
 
-        public RangeTombstone deserializeFromSSTable(DataInput in, Version version) throws IOException
+        public RangeTombstone deserializeFromSSTable(DataInput in, Descriptor.Version version) throws IOException
         {
             Composite min = type.serializer().deserialize(in);
 
@@ -268,14 +269,14 @@ public class RangeTombstone extends Interval<Composite, DeletionTime> implements
             return deserializeBody(in, min, version);
         }
 
-        public RangeTombstone deserializeBody(DataInput in, Composite min, Version version) throws IOException
+        public RangeTombstone deserializeBody(DataInput in, Composite min, Descriptor.Version version) throws IOException
         {
             Composite max = type.serializer().deserialize(in);
             DeletionTime dt = DeletionTime.serializer.deserialize(in);
             return new RangeTombstone(min, max, dt);
         }
 
-        public void skipBody(DataInput in, Version version) throws IOException
+        public void skipBody(DataInput in, Descriptor.Version version) throws IOException
         {
             type.serializer().skip(in);
             DeletionTime.serializer.skip(in);

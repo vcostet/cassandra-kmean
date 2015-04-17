@@ -48,11 +48,10 @@ public class ComitLogStress
             System.out.println("Setting num threads to: " + NUM_THREADS);
         }
         ExecutorService executor = new JMXEnabledThreadPoolExecutor(NUM_THREADS, NUM_THREADS, 60,
-                TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(10 * NUM_THREADS), new NamedThreadFactory("Stress"), "");
+                TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(10 * NUM_THREADS), new NamedThreadFactory(""), "");
         ScheduledExecutorService scheduled = Executors.newScheduledThreadPool(1);
 
         org.apache.cassandra.SchemaLoader.loadSchema();
-        org.apache.cassandra.SchemaLoader.schemaDefinition(""); // leave def. blank to maintain old behaviour
         final AtomicLong count = new AtomicLong();
         final long start = System.currentTimeMillis();
         System.out.println(String.format(format, "seconds", "max_mb", "allocated_mb", "free_mb", "diffrence", "count"));
@@ -86,12 +85,10 @@ public class ComitLogStress
         public void run() {
             String ks = "Keyspace1";
             ByteBuffer key = ByteBufferUtil.bytes(keyString);
-            for (int i=0; i<100; ++i) {
-                Mutation mutation = new Mutation(ks, key);
-                mutation.add("Standard1", Util.cellname("name"), ByteBufferUtil.bytes("value" + i),
-                        System.currentTimeMillis());
-                CommitLog.instance.add(mutation);
-            }
+            Mutation mutation = new Mutation(ks, key);
+            mutation.add("Standard1", Util.cellname("name"), ByteBufferUtil.bytes("value"),
+                    System.currentTimeMillis());
+            CommitLog.instance.add(mutation);
         }
     }
 }

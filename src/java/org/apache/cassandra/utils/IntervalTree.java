@@ -26,6 +26,7 @@ import java.util.*;
 import com.google.common.base.Joiner;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Ordering;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,41 +34,75 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.utils.AsymmetricOrdering.Op;
 
-public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval<C, D>> implements Iterable<I>
+public class IntervalTree<C, D, I extends Interval<C, D>> implements Iterable<I>
 {
     private static final Logger logger = LoggerFactory.getLogger(IntervalTree.class);
 
     @SuppressWarnings("unchecked")
-    private static final IntervalTree EMPTY_TREE = new IntervalTree(null);
+    private static final IntervalTree EMPTY_TREE = new IntervalTree(null, null);
 
     private final IntervalNode head;
     private final int count;
+    private final Comparator<C> comparator;
 
-    protected IntervalTree(Collection<I> intervals)
+    final Ordering<I> minOrdering;
+    final Ordering<I> maxOrdering;
+
+    protected IntervalTree(Collection<I> intervals, Comparator<C> comparator)
     {
+        this.comparator = comparator;
+
+        final IntervalTree it = this;
+        this.minOrdering = new Ordering<I>()
+        {
+            public int compare(I interval1, I interval2)
+            {
+                return it.comparePoints(interval1.min, interval2.min);
+            }
+        };
+        this.maxOrdering = new Ordering<I>()
+        {
+            public int compare(I interval1, I interval2)
+            {
+                return it.comparePoints(interval1.max, interval2.max);
+            }
+        };
+
         this.head = intervals == null || intervals.isEmpty() ? null : new IntervalNode(intervals);
         this.count = intervals == null ? 0 : intervals.size();
     }
 
-    public static <C extends Comparable<? super C>, D, I extends Interval<C, D>> IntervalTree<C, D, I> build(Collection<I> intervals)
+    public static <C, D, I extends Interval<C, D>> IntervalTree<C, D, I> build(Collection<I> intervals, Comparator<C> comparator)
     {
         if (intervals == null || intervals.isEmpty())
             return emptyTree();
 
-        return new IntervalTree<C, D, I>(intervals);
+        return new IntervalTree<C, D, I>(intervals, comparator);
     }
 
-    public static <C extends Comparable<? super C>, D, I extends Interval<C, D>> Serializer<C, D, I> serializer(ISerializer<C> pointSerializer, ISerializer<D> dataSerializer, Constructor<I> constructor)
+    public static <C extends Comparable<C>, D, I extends Interval<C, D>> IntervalTree<C, D, I> build(Collection<I> intervals)
+    {
+        if (intervals == null || intervals.isEmpty())
+            return emptyTree();
+
+        return new IntervalTree<C, D, I>(intervals, null);
+    }
+
+    public static <C, D, I extends Interval<C, D>> Serializer<C, D, I> serializer(ISerializer<C> pointSerializer, ISerializer<D> dataSerializer, Constructor<I> constructor)
     {
         return new Serializer<>(pointSerializer, dataSerializer, constructor);
     }
 
     @SuppressWarnings("unchecked")
-    public static <C extends Comparable<? super C>, D, I extends Interval<C, D>> IntervalTree<C, D, I> emptyTree()
+    public static <C, D, I extends Interval<C, D>> IntervalTree<C, D, I> emptyTree()
     {
         return (IntervalTree<C, D, I>)EMPTY_TREE;
+    }
+
+    public Comparator<C> comparator()
+    {
+        return comparator;
     }
 
     public int intervalCount()
@@ -137,10 +172,41 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
     @Override
     public final int hashCode()
     {
-        int result = 0;
+        int result = comparator.hashCode();
         for (Interval<C, D> interval : this)
             result = 31 * result + interval.hashCode();
         return result;
+    }
+
+    private int comparePoints(C point1, C point2)
+    {
+        if (comparator != null)
+        {
+            return comparator.compare(point1, point2);
+        }
+        else
+        {
+            assert point1 instanceof Comparable;
+            assert point2 instanceof Comparable;
+            return ((Comparable<C>)point1).compareTo(point2);
+        }
+    }
+
+    private boolean encloses(Interval<C, D> enclosing, Interval<C, D> enclosed)
+    {
+        return comparePoints(enclosing.min, enclosed.min) <= 0
+            && comparePoints(enclosing.max, enclosed.max) >= 0;
+    }
+
+    private boolean contains(Interval<C, D> interval, C point)
+    {
+        return comparePoints(interval.min, point) <= 0
+            && comparePoints(interval.max, point) >= 0;
+    }
+
+    private boolean intersects(Interval<C, D> interval1, Interval<C, D> interval2)
+    {
+        return contains(interval1, interval2.min) || contains(interval1, interval2.max);
     }
 
     private class IntervalNode
@@ -180,11 +246,15 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
                 List<C> allEndpoints = new ArrayList<C>(toBisect.size() * 2);
                 for (I interval : toBisect)
                 {
+                    assert (comparator == null ? ((Comparable)interval.min).compareTo(interval.max)
+                                               : comparator.compare(interval.min, interval.max)) <= 0 : "Interval min > max";
                     allEndpoints.add(interval.min);
                     allEndpoints.add(interval.max);
                 }
-
-                Collections.sort(allEndpoints);
+                if (comparator != null)
+                    Collections.sort(allEndpoints, comparator);
+                else
+                    Collections.sort((List<Comparable>)allEndpoints);
 
                 low = allEndpoints.get(0);
                 center = allEndpoints.get(toBisect.size());
@@ -197,16 +267,16 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
 
                 for (I candidate : toBisect)
                 {
-                    if (candidate.max.compareTo(center) < 0)
+                    if (comparePoints(candidate.max, center) < 0)
                         leftSegment.add(candidate);
-                    else if (candidate.min.compareTo(center) > 0)
+                    else if (comparePoints(candidate.min, center) > 0)
                         rightSegment.add(candidate);
                     else
                         intersects.add(candidate);
                 }
 
-                intersectsLeft = Interval.<C, D>minOrdering().sortedCopy(intersects);
-                intersectsRight = Interval.<C, D>maxOrdering().sortedCopy(intersects);
+                intersectsLeft = minOrdering.sortedCopy(intersects);
+                intersectsRight = maxOrdering.reverse().sortedCopy(intersects);
                 left = leftSegment.isEmpty() ? null : new IntervalNode(leftSegment);
                 right = rightSegment.isEmpty() ? null : new IntervalNode(rightSegment);
 
@@ -220,31 +290,10 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
 
         void searchInternal(Interval<C, D> searchInterval, List<D> results)
         {
-            if (center.compareTo(searchInterval.min) < 0)
-            {
-                int i = Interval.<C, D>maxOrdering().binarySearchAsymmetric(intersectsRight, searchInterval.min, Op.CEIL);
-                if (i == intersectsRight.size() && high.compareTo(searchInterval.min) < 0)
-                    return;
+            if (comparePoints(searchInterval.max, low) < 0 || comparePoints(searchInterval.min, high) > 0)
+                return;
 
-                while (i < intersectsRight.size())
-                    results.add(intersectsRight.get(i++).data);
-
-                if (right != null)
-                    right.searchInternal(searchInterval, results);
-            }
-            else if (center.compareTo(searchInterval.max) > 0)
-            {
-                int j = Interval.<C, D>minOrdering().binarySearchAsymmetric(intersectsLeft, searchInterval.max, Op.HIGHER);
-                if (j == 0 && low.compareTo(searchInterval.max) > 0)
-                    return;
-
-                for (int i = 0 ; i < j ; i++)
-                    results.add(intersectsLeft.get(i).data);
-
-                if (left != null)
-                    left.searchInternal(searchInterval, results);
-            }
-            else
+            if (contains(searchInterval, center))
             {
                 // Adds every interval contained in this node to the result set then search left and right for further
                 // overlapping intervals
@@ -255,6 +304,35 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
                     left.searchInternal(searchInterval, results);
                 if (right != null)
                     right.searchInternal(searchInterval, results);
+            }
+            else if (comparePoints(center, searchInterval.min) < 0)
+            {
+                // Adds intervals i in intersects right as long as i.max >= searchInterval.min
+                // then search right
+                for (Interval<C, D> interval : intersectsRight)
+                {
+                    if (comparePoints(interval.max, searchInterval.min) >= 0)
+                        results.add(interval.data);
+                    else
+                        break;
+                }
+                if (right != null)
+                    right.searchInternal(searchInterval, results);
+            }
+            else
+            {
+                assert comparePoints(center, searchInterval.max) > 0;
+                // Adds intervals i in intersects left as long as i.min >= searchInterval.max
+                // then search left
+                for (Interval<C, D> interval : intersectsLeft)
+                {
+                    if (comparePoints(interval.min, searchInterval.max) <= 0)
+                        results.add(interval.data);
+                    else
+                        break;
+                }
+                if (left != null)
+                    left.searchInternal(searchInterval, results);
             }
         }
     }
@@ -299,7 +377,7 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
         }
     }
 
-    public static class Serializer<C extends Comparable<? super C>, D, I extends Interval<C, D>> implements IVersionedSerializer<IntervalTree<C, D, I>>
+    public static class Serializer<C, D, I extends Interval<C, D>> implements IVersionedSerializer<IntervalTree<C, D, I>>
     {
         private final ISerializer<C> pointSerializer;
         private final ISerializer<D> dataSerializer;
@@ -339,7 +417,7 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
             try
             {
                 int count = in.readInt();
-                List<I> intervals = new ArrayList<I>(count);
+                List<Interval<C, D>> intervals = new ArrayList<Interval<C, D>>(count);
                 for (int i = 0; i < count; i++)
                 {
                     C min = pointSerializer.deserialize(in);
@@ -347,7 +425,7 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
                     D data = dataSerializer.deserialize(in);
                     intervals.add(constructor.newInstance(min, max, data));
                 }
-                return new IntervalTree<C, D, I>(intervals);
+                return new IntervalTree(intervals, comparator);
             }
             catch (InstantiationException e)
             {

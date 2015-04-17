@@ -27,6 +27,7 @@ import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.LocalPartitioner;
+import org.apache.cassandra.dht.LocalToken;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -56,13 +57,18 @@ public abstract class AbstractSimplePerColumnSecondaryIndex extends PerColumnSec
         indexCfs = ColumnFamilyStore.createColumnFamilyStore(baseCfs.keyspace,
                                                              indexedCfMetadata.cfName,
                                                              new LocalPartitioner(getIndexKeyComparator()),
-                                                             indexedCfMetadata,
-                                                             baseCfs.getDataTracker().loadsstables);
+                                                             indexedCfMetadata);
     }
 
     protected AbstractType<?> getIndexKeyComparator()
     {
         return columnDef.type;
+    }
+
+    @Override
+    public DecoratedKey getIndexKeyFor(ByteBuffer value)
+    {
+        return new BufferDecoratedKey(new LocalToken(getIndexKeyComparator(), value), value);
     }
 
     @Override

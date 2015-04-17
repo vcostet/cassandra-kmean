@@ -30,7 +30,6 @@ import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.io.util.MemoryOutputStream;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
-import org.apache.cassandra.utils.memory.MemoryUtil;
 
 import static org.apache.cassandra.io.sstable.Downsampling.BASE_SAMPLING_LEVEL;
 
@@ -107,13 +106,11 @@ public class IndexSummary extends WrappedSharedCloseable
     // Harmony's Collections implementation
     public int binarySearch(RowPosition key)
     {
-        ByteBuffer hollow = MemoryUtil.getHollowDirectByteBuffer();
         int low = 0, mid = offsetCount, high = mid - 1, result = -1;
         while (low <= high)
         {
             mid = (low + high) >> 1;
-            fillTemporaryKey(mid, hollow);
-            result = -DecoratedKey.compareTo(partitioner, hollow, key);
+            result = -DecoratedKey.compareTo(partitioner, ByteBuffer.wrap(getKey(mid)), key);
             if (result > 0)
             {
                 low = mid + 1;
@@ -149,13 +146,6 @@ public class IndexSummary extends WrappedSharedCloseable
         byte[] key = new byte[keySize];
         entries.getBytes(start, key, 0, keySize);
         return key;
-    }
-
-    private void fillTemporaryKey(int index, ByteBuffer buffer)
-    {
-        long start = getPositionInSummary(index);
-        int keySize = (int) (calculateEnd(index) - start - 8L);
-        entries.setByteBuffer(buffer, start, keySize);
     }
 
     public long getPosition(int index)
@@ -229,7 +219,7 @@ public class IndexSummary extends WrappedSharedCloseable
         return entries;
     }
 
-    public long getOffHeapSize()
+    long getOffHeapSize()
     {
         return offsetCount * 4 + entriesLength;
     }

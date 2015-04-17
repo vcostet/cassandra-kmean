@@ -23,7 +23,6 @@ import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.Term.MultiColumnRaw;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
@@ -111,21 +110,21 @@ public class Tuples
 
                 Term.Raw value = elements.get(i);
                 ColumnSpecification spec = componentSpecOf(receiver, i);
-                if (!value.testAssignment(keyspace, spec).isAssignable())
+                if (!value.isAssignableTo(keyspace, spec))
                     throw new InvalidRequestException(String.format("Invalid tuple literal for %s: component %d is not of type %s", receiver.name, i, spec.type.asCQL3Type()));
             }
         }
 
-        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
             try
             {
                 validateAssignableTo(keyspace, receiver);
-                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                return true;
             }
             catch (InvalidRequestException e)
             {
-                return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+                return false;
             }
         }
 
@@ -153,7 +152,7 @@ public class Tuples
             return new Value(type.split(bytes));
         }
 
-        public ByteBuffer get(int protocolVersion)
+        public ByteBuffer get(QueryOptions options)
         {
             return TupleType.buildValue(elements);
         }
@@ -264,7 +263,7 @@ public class Tuples
             }
         }
 
-        public ByteBuffer get(int protocolVersion)
+        public ByteBuffer get(QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
@@ -277,9 +276,7 @@ public class Tuples
 
     /**
      * A raw placeholder for a tuple of values for different multiple columns, each of which may have a different type.
-     * {@code
      * For example, "SELECT ... WHERE (col1, col2) > ?".
-     * }
      */
     public static class Raw extends AbstractMarker.Raw implements Term.MultiColumnRaw
     {
@@ -288,7 +285,7 @@ public class Tuples
             super(bindIndex);
         }
 
-        private static ColumnSpecification makeReceiver(List<? extends ColumnSpecification> receivers)
+        private static ColumnSpecification makeReceiver(List<? extends ColumnSpecification> receivers) throws InvalidRequestException
         {
             List<AbstractType<?>> types = new ArrayList<>(receivers.size());
             StringBuilder inName = new StringBuilder("(");
@@ -322,7 +319,7 @@ public class Tuples
     /**
      * A raw marker for an IN list of tuples, like "SELECT ... WHERE (a, b, c) IN ?"
      */
-    public static class INRaw extends AbstractMarker.Raw implements MultiColumnRaw
+    public static class INRaw extends AbstractMarker.Raw
     {
         public INRaw(int bindIndex)
         {
@@ -365,9 +362,7 @@ public class Tuples
     }
 
     /**
-     * {@code
      * Represents a marker for a single tuple, like "SELECT ... WHERE (a, b, c) > ?"
-     * }
      */
     public static class Marker extends AbstractMarker
     {

@@ -95,6 +95,18 @@ public class SettingsMode implements Serializable
             authProvider = null;
             authProviderClassname = null;
         }
+        else if (options instanceof Cql2ThriftOptions)
+        {
+            cqlVersion = CqlVersion.CQL2;
+            api = ConnectionAPI.THRIFT;
+            Cql2ThriftOptions opts = (Cql2ThriftOptions) options;
+            style = opts.usePrepared.setByUser() ? ConnectionStyle.CQL_PREPARED : ConnectionStyle.CQL;
+            compression = ProtocolOptions.Compression.NONE.name();
+            username = null;
+            password = null;
+            authProvider = null;
+            authProviderClassname = null;
+        }
         else if (options instanceof ThriftOptions)
         {
             ThriftOptions opts = (ThriftOptions) options;
@@ -169,6 +181,19 @@ public class SettingsMode implements Serializable
         }
     }
 
+    private static final class Cql2ThriftOptions extends GroupedOptions
+    {
+        final OptionSimple api = new OptionSimple("cql2", "", null, "", true);
+        final OptionSimple mode = new OptionSimple("thrift", "", null, "", true);
+        final OptionSimple usePrepared = new OptionSimple("prepared", "", null, "", false);
+
+        @Override
+        public List<? extends Option> options()
+        {
+            return Arrays.asList(mode, api, usePrepared);
+        }
+    }
+
     private static final class ThriftOptions extends GroupedOptions
     {
         final OptionSimple api = new OptionSimple("thrift", "", null, "", true);
@@ -198,7 +223,7 @@ public class SettingsMode implements Serializable
             return new SettingsMode(opts);
         }
 
-        GroupedOptions options = GroupedOptions.select(params, new ThriftOptions(), new Cql3NativeOptions(), new Cql3SimpleNativeOptions());
+        GroupedOptions options = GroupedOptions.select(params, new ThriftOptions(), new Cql3NativeOptions(), new Cql3ThriftOptions(), new Cql3SimpleNativeOptions(), new Cql2ThriftOptions());
         if (options == null)
         {
             printHelp();
@@ -210,7 +235,7 @@ public class SettingsMode implements Serializable
 
     public static void printHelp()
     {
-        GroupedOptions.printOptions(System.out, "-mode", new ThriftOptions(), new Cql3NativeOptions(), new Cql3SimpleNativeOptions());
+        GroupedOptions.printOptions(System.out, "-mode", new ThriftOptions(), new Cql3NativeOptions(), new Cql3ThriftOptions(), new Cql3SimpleNativeOptions(), new Cql2ThriftOptions());
     }
 
     public static Runnable helpPrinter()

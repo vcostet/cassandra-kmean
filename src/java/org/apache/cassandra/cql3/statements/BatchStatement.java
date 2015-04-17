@@ -23,9 +23,6 @@ import java.util.*;
 import com.google.common.base.Function;
 import com.google.common.collect.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
-
-import org.apache.cassandra.tracing.Tracing;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,16 +73,6 @@ public class BatchStatement implements CQLStatement
         this.statements = statements;
         this.attrs = attrs;
         this.hasConditions = hasConditions;
-    }
-
-    public boolean usesFunction(String ksName, String functionName)
-    {
-        if (attrs.usesFunction(ksName, functionName))
-            return true;
-        for (ModificationStatement statement : statements)
-            if (statement.usesFunction(ksName, functionName))
-                return true;
-        return false;
     }
 
     public int getBoundTerms()
@@ -238,11 +225,10 @@ public class BatchStatement implements CQLStatement
      * Checks batch size to ensure threshold is met. If not, a warning is logged.
      * @param cfs ColumnFamilies that will store the batch's mutations.
      */
-    public static void verifyBatchSize(Iterable<ColumnFamily> cfs) throws InvalidRequestException
+    public static void verifyBatchSize(Iterable<ColumnFamily> cfs)
     {
         long size = 0;
         long warnThreshold = DatabaseDescriptor.getBatchSizeWarnThreshold();
-        long failThreshold = DatabaseDescriptor.getBatchSizeFailThreshold();
 
         for (ColumnFamily cf : cfs)
             size += cf.dataSize();
@@ -253,17 +239,8 @@ public class BatchStatement implements CQLStatement
             for (ColumnFamily cf : cfs)
                 ksCfPairs.add(cf.metadata().ksName + "." + cf.metadata().cfName);
 
-            String format = "Batch of prepared statements for {} is of size {}, exceeding specified threshold of {} by {}.{}";
-            if (size > failThreshold)
-            {
-                Tracing.trace(format, ksCfPairs, size, failThreshold, size - failThreshold, " (see batch_size_fail_threshold_in_kb)");
-                logger.error(format, ksCfPairs, size, failThreshold, size - failThreshold, " (see batch_size_fail_threshold_in_kb)");
-                throw new InvalidRequestException(String.format("Batch too large"));
-            }
-            else if (logger.isWarnEnabled())
-            {
-                logger.warn(format, ksCfPairs, size, warnThreshold, size - warnThreshold, "");
-            }
+            String format = "Batch of prepared statements for {} is of size {}, exceeding specified threshold of {} by {}.";
+            logger.warn(format, ksCfPairs, size, warnThreshold, size - warnThreshold);
         }
     }
 
@@ -403,25 +380,9 @@ public class BatchStatement implements CQLStatement
         {
             VariableSpecifications boundNames = getBoundVariables();
 
-            String firstKS = null;
-            String firstCF = null;
-            boolean haveMultipleCFs = false;
-
             List<ModificationStatement> statements = new ArrayList<>(parsedStatements.size());
             for (ModificationStatement.Parsed parsed : parsedStatements)
-            {
-                if (firstKS == null)
-                {
-                    firstKS = parsed.keyspace();
-                    firstCF = parsed.columnFamily();
-                }
-                else if (!haveMultipleCFs)
-                {
-                    haveMultipleCFs = !firstKS.equals(parsed.keyspace()) || !firstCF.equals(parsed.columnFamily());
-                }
-
                 statements.add(parsed.prepare(boundNames));
-            }
 
             Attributes prepAttrs = attrs.prepare("[batch]", "[batch]");
             prepAttrs.collectMarkerSpecification(boundNames);
@@ -429,12 +390,7 @@ public class BatchStatement implements CQLStatement
             BatchStatement batchStatement = new BatchStatement(boundNames.size(), type, statements, prepAttrs);
             batchStatement.validate();
 
-            // Use the CFMetadata of the first statement for partition key bind indexes.  If the statements affect
-            // multiple tables, we won't send partition key bind indexes.
-            Short[] partitionKeyBindIndexes = haveMultipleCFs ? null
-                                                              : boundNames.getPartitionKeyBindIndexes(batchStatement.statements.get(0).cfm);
-
-            return new ParsedStatement.Prepared(batchStatement, boundNames, partitionKeyBindIndexes);
+            return new ParsedStatement.Prepared(batchStatement, boundNames);
         }
     }
 }

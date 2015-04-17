@@ -93,12 +93,12 @@ public class ThriftValidation
         if (isCommutativeOp)
         {
             if (!metadata.isCounter())
-                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for non commutative table " + cfName);
+                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for non commutative columnfamily " + cfName);
         }
         else
         {
             if (metadata.isCounter())
-                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for commutative table " + cfName);
+                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for commutative columnfamily " + cfName);
         }
         return metadata;
     }
@@ -108,11 +108,11 @@ public class ThriftValidation
     {
         validateKeyspace(keyspaceName);
         if (cfName.isEmpty())
-            throw new org.apache.cassandra.exceptions.InvalidRequestException("non-empty table is required");
+            throw new org.apache.cassandra.exceptions.InvalidRequestException("non-empty columnfamily is required");
 
         CFMetaData metadata = Schema.instance.getCFMetaData(keyspaceName, cfName);
         if (metadata == null)
-            throw new org.apache.cassandra.exceptions.InvalidRequestException("unconfigured table " + cfName);
+            throw new org.apache.cassandra.exceptions.InvalidRequestException("unconfigured columnfamily " + cfName);
 
         return metadata;
     }
@@ -154,7 +154,7 @@ public class ThriftValidation
         {
             if (column_parent.super_column != null)
             {
-                throw new org.apache.cassandra.exceptions.InvalidRequestException("table alone is required for standard CF " + metadata.cfName);
+                throw new org.apache.cassandra.exceptions.InvalidRequestException("columnfamily alone is required for standard CF " + metadata.cfName);
             }
         }
 
@@ -207,7 +207,7 @@ public class ThriftValidation
             if (superColumnName.remaining() == 0)
                 throw new org.apache.cassandra.exceptions.InvalidRequestException("supercolumn name must not be empty");
             if (metadata.cfType == ColumnFamilyType.Standard)
-                throw new org.apache.cassandra.exceptions.InvalidRequestException("supercolumn specified to table " + metadata.cfName + " containing normal columns");
+                throw new org.apache.cassandra.exceptions.InvalidRequestException("supercolumn specified to ColumnFamily " + metadata.cfName + " containing normal columns");
         }
         AbstractType<?> comparator = SuperColumns.getComparatorFor(metadata, superColumnName);
         boolean isCQL3Table = !metadata.isThriftCompatible();
@@ -311,7 +311,7 @@ public class ThriftValidation
         if (cosc.column != null)
         {
             if (isCommutative)
-                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for commutative table " + metadata.cfName);
+                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for commutative columnfamily " + metadata.cfName);
 
             validateTtl(cosc.column);
             validateColumnPath(metadata, new ColumnPath(metadata.cfName).setSuper_column((ByteBuffer)null).setColumn(cosc.column.name));
@@ -321,7 +321,7 @@ public class ThriftValidation
         if (cosc.super_column != null)
         {
             if (isCommutative)
-                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for commutative table " + metadata.cfName);
+                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for commutative columnfamily " + metadata.cfName);
 
             for (Column c : cosc.super_column.columns)
             {
@@ -333,7 +333,7 @@ public class ThriftValidation
         if (cosc.counter_column != null)
         {
             if (!isCommutative)
-                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for non commutative table " + metadata.cfName);
+                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for non commutative columnfamily " + metadata.cfName);
 
             validateColumnPath(metadata, new ColumnPath(metadata.cfName).setSuper_column((ByteBuffer)null).setColumn(cosc.counter_column.name));
         }
@@ -341,7 +341,7 @@ public class ThriftValidation
         if (cosc.counter_super_column != null)
         {
             if (!isCommutative)
-                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for non commutative table " + metadata.cfName);
+                throw new org.apache.cassandra.exceptions.InvalidRequestException("invalid operation for non commutative columnfamily " + metadata.cfName);
 
             for (CounterColumn c : cosc.counter_super_column.columns)
                 validateColumnPath(metadata, new ColumnPath(metadata.cfName).setSuper_column(cosc.counter_super_column.name).setColumn(c.name));
@@ -401,7 +401,7 @@ public class ThriftValidation
 
         if (metadata.cfType == ColumnFamilyType.Standard && del.super_column != null)
         {
-            String msg = String.format("Deletion of super columns is not possible on a standard table (KeySpace=%s Table=%s Deletion=%s)", metadata.ksName, metadata.cfName, del);
+            String msg = String.format("Deletion of super columns is not possible on a standard ColumnFamily (KeySpace=%s ColumnFamily=%s Deletion=%s)", metadata.ksName, metadata.cfName, del);
             throw new org.apache.cassandra.exceptions.InvalidRequestException(msg);
         }
 
@@ -412,7 +412,7 @@ public class ThriftValidation
         }
         else if (!del.isSetTimestamp())
         {
-            throw new org.apache.cassandra.exceptions.InvalidRequestException("Deletion timestamp is not optional for non commutative table " + metadata.cfName);
+            throw new org.apache.cassandra.exceptions.InvalidRequestException("Deletion timestamp is not optional for non commutative column family " + metadata.cfName);
         }
     }
 
@@ -522,7 +522,7 @@ public class ThriftValidation
         {
             Token startToken = p.getToken(range.start_key);
             Token endToken = p.getToken(range.end_key);
-            if (startToken.compareTo(endToken) > 0 && !endToken.isMinimum())
+            if (startToken.compareTo(endToken) > 0 && !endToken.isMinimum(p))
             {
                 if (p.preservesOrder())
                     throw new org.apache.cassandra.exceptions.InvalidRequestException("start key must sort before (or equal to) finish key in your partitioner!");
@@ -533,7 +533,7 @@ public class ThriftValidation
         else if (range.start_key != null && range.end_token != null)
         {
             // start_token/end_token can wrap, but key/token should not
-            RowPosition stop = p.getTokenFactory().fromString(range.end_token).maxKeyBound();
+            RowPosition stop = p.getTokenFactory().fromString(range.end_token).maxKeyBound(p);
             if (RowPosition.ForKey.get(range.start_key, p).compareTo(stop) > 0 && !stop.isMinimum())
                 throw new org.apache.cassandra.exceptions.InvalidRequestException("Start key's token sorts after end token");
         }
@@ -631,7 +631,7 @@ public class ThriftValidation
 
     public static void validateKeyspaceNotSystem(String modifiedKeyspace) throws org.apache.cassandra.exceptions.InvalidRequestException
     {
-        if (modifiedKeyspace.equalsIgnoreCase(SystemKeyspace.NAME))
+        if (modifiedKeyspace.equalsIgnoreCase(Keyspace.SYSTEM_KS))
             throw new org.apache.cassandra.exceptions.InvalidRequestException("system keyspace is not user-modifiable");
     }
 

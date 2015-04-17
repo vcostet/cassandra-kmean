@@ -91,14 +91,14 @@ public final class ErrorCollector implements ErrorListener
     }
 
     /**
-     * Throws the first syntax error found by the lexer or the parser if it exists.
+     * Throws the last syntax error found by the lexer or the parser if it exists.
      *
      * @throws SyntaxException the syntax error.
      */
-    public void throwFirstSyntaxError() throws SyntaxException
+    public void throwLastSyntaxError() throws SyntaxException
     {
         if (!errorMsgs.isEmpty())
-            throw new SyntaxException(errorMsgs.getFirst());
+            throw new SyntaxException(errorMsgs.getLast());
     }
 
     /**
@@ -146,9 +146,7 @@ public final class ErrorCollector implements ErrorListener
         if (!includeQueryStart)
             builder.append("...");
 
-        String toLine = lines[lineIndex(to)];
-        int toEnd = getLastCharPositionInLine(to);
-        lines[lineIndex(to)] = toEnd >= toLine.length() ? toLine : toLine.substring(0, toEnd);
+        lines[lineIndex(to)] = lines[lineIndex(to)].substring(0, getLastCharPositionInLine(to));
         lines[lineIndex(offending)] = highlightToken(lines[lineIndex(offending)], offending);
         lines[lineIndex(from)] = lines[lineIndex(from)].substring(from.getCharPositionInLine());
 
@@ -165,8 +163,7 @@ public final class ErrorCollector implements ErrorListener
      * Checks if the specified tokens are valid.
      *
      * @param tokens the tokens to check
-     * @return <code>true</code> if all the specified tokens are valid ones,
-     * <code>false</code> otherwise.
+     * @return <code>true</code> if all the specified tokens are valid ones, <code>false</code> otherwise.
      */
     private static boolean areTokensValid(Token... tokens)
     {

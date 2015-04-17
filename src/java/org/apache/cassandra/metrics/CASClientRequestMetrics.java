@@ -18,14 +18,12 @@
  */
 package org.apache.cassandra.metrics;
 
-import com.codahale.metrics.Counter;
-import com.codahale.metrics.Histogram;
-
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
-
+import com.yammer.metrics.*;
+import com.yammer.metrics.core.*;
 
 public class CASClientRequestMetrics extends ClientRequestMetrics
 {
+
     public final Histogram contention;
     /* Used only for write  */
     public final Counter conditionNotMet;
@@ -34,16 +32,16 @@ public class CASClientRequestMetrics extends ClientRequestMetrics
 
     public CASClientRequestMetrics(String scope) {
         super(scope);
-        contention = Metrics.histogram(factory.createMetricName("ContentionHistogram"));
-        conditionNotMet =  Metrics.counter(factory.createMetricName("ConditionNotMet"));
-        unfinishedCommit =  Metrics.counter(factory.createMetricName("UnfinishedCommit"));
+        contention = Metrics.newHistogram(factory.createMetricName("ContentionHistogram"), true);
+        conditionNotMet =  Metrics.newCounter(factory.createMetricName("ConditionNotMet"));
+        unfinishedCommit =  Metrics.newCounter(factory.createMetricName("UnfinishedCommit"));
     }
 
     public void release()
     {
         super.release();
-        Metrics.remove(factory.createMetricName("ContentionHistogram"));
-        Metrics.remove(factory.createMetricName("ConditionNotMet"));
-        Metrics.remove(factory.createMetricName("UnfinishedCommit"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("ContentionHistogram"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("ConditionNotMet"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("UnfinishedCommit"));
     }
 }

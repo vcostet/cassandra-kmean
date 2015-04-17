@@ -93,7 +93,7 @@ public final class Cursor<K, V extends K> extends Path implements Iterator<V>
 
     private void _reset(Object[] btree, Comparator<K> comparator, Object lowerBound, boolean inclusiveLowerBound, Object upperBound, boolean inclusiveUpperBound, boolean forwards)
     {
-        init(btree);
+        ensureDepth(btree);
         if (lowerBound == null)
             lowerBound = NEGATIVE_INFINITY;
         if (upperBound == null)
@@ -101,16 +101,16 @@ public final class Cursor<K, V extends K> extends Path implements Iterator<V>
 
         this.forwards = forwards;
 
-        Path findLast = new Path(this.path.length, btree);
+        Path findLast = new Path(this.path.length);
         if (forwards)
         {
-            findLast.find(comparator, upperBound, inclusiveUpperBound ? Op.HIGHER : Op.CEIL, true);
-            find(comparator, lowerBound, inclusiveLowerBound ? Op.CEIL : Op.HIGHER, true);
+            findLast.find(btree, comparator, upperBound, inclusiveUpperBound ? Op.HIGHER : Op.CEIL, true);
+            find(btree, comparator, lowerBound, inclusiveLowerBound ? Op.CEIL : Op.HIGHER, true);
         }
         else
         {
-            findLast.find(comparator, lowerBound, inclusiveLowerBound ? Op.LOWER : Op.FLOOR, false);
-            find(comparator, upperBound, inclusiveUpperBound ? Op.FLOOR : Op.LOWER, false);
+            findLast.find(btree, comparator, lowerBound, inclusiveLowerBound ? Op.LOWER : Op.FLOOR, false);
+            find(btree, comparator, upperBound, inclusiveUpperBound ? Op.FLOOR : Op.LOWER, false);
         }
         int c = this.compareTo(findLast, forwards);
         if (forwards ? c > 0 : c < 0)

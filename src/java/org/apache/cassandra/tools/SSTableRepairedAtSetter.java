@@ -36,9 +36,8 @@ import org.apache.cassandra.service.ActiveRepairService;
  *
  * If you know you ran repair 2 weeks ago, you can do something like
  *
- * {@code
  * sstablerepairset --is-repaired -f <(find /var/lib/cassandra/data/.../ -iname "*Data.db*" -mtime +14)
- * }
+ *
  */
 public class SSTableRepairedAtSetter
 {
@@ -78,7 +77,7 @@ public class SSTableRepairedAtSetter
         for (String fname: fileNames)
         {
             Descriptor descriptor = Descriptor.fromFilename(fname);
-            if (descriptor.version.hasRepairedAt())
+            if (descriptor.version.hasRepairedAt)
             {
                 if (setIsRepaired)
                 {

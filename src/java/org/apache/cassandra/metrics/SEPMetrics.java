@@ -17,24 +17,22 @@
  */
 package org.apache.cassandra.metrics;
 
-import com.codahale.metrics.Counter;
-import com.codahale.metrics.Gauge;
+import com.yammer.metrics.Metrics;
+import com.yammer.metrics.core.Gauge;
 
 import org.apache.cassandra.concurrent.SEPExecutor;
-
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 public class SEPMetrics
 {
     /** Number of active tasks. */
     public final Gauge<Integer> activeTasks;
     /** Number of tasks that had blocked before being accepted (or rejected). */
-    public final Counter totalBlocked;
+    public final Gauge<Integer> totalBlocked;
     /**
      * Number of tasks currently blocked, waiting to be accepted by
      * the executor (because all threads are busy and the backing queue is full).
      */
-    public final Counter currentBlocked;
+    public final Gauge<Long> currentBlocked;
     /** Number of completed tasks. */
     public final Gauge<Long> completedTasks;
     /** Number of tasks waiting to be executed. */
@@ -54,33 +52,44 @@ public class SEPMetrics
     public SEPMetrics(final SEPExecutor executor, String path, String poolName)
     {
         this.factory = new ThreadPoolMetricNameFactory("ThreadPools", path, poolName);
-        activeTasks = Metrics.register(factory.createMetricName("ActiveTasks"), new Gauge<Integer>()
+        activeTasks = Metrics.newGauge(factory.createMetricName("ActiveTasks"), new Gauge<Integer>()
         {
-            public Integer getValue()
+            public Integer value()
             {
                 return executor.getActiveCount();
             }
         });
-        pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), new Gauge<Long>()
+        pendingTasks = Metrics.newGauge(factory.createMetricName("PendingTasks"), new Gauge<Long>()
         {
-            public Long getValue()
+            public Long value()
             {
                 return executor.getPendingTasks();
             }
         });
-        totalBlocked = Metrics.counter(factory.createMetricName("TotalBlockedTasks"));
-        currentBlocked = Metrics.counter(factory.createMetricName("CurrentlyBlockedTasks"));
-
-        completedTasks = Metrics.register(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
+        totalBlocked = Metrics.newGauge(factory.createMetricName("TotalBlockedTasks"), new Gauge<Integer>()
         {
-            public Long getValue()
+            public Integer value()
+            {
+                return executor.getTotalBlockedTasks();
+            }
+        });
+        currentBlocked = Metrics.newGauge(factory.createMetricName("CurrentlyBlockedTasks"), new Gauge<Long>()
+        {
+            public Long value()
+            {
+                return (long) executor.getCurrentlyBlockedTasks();
+            }
+        });
+        completedTasks = Metrics.newGauge(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
+        {
+            public Long value()
             {
                 return executor.getCompletedTasks();
             }
         });
-        maxPoolSize =  Metrics.register(factory.createMetricName("MaxPoolSize"), new Gauge<Integer>()
+        maxPoolSize =  Metrics.newGauge(factory.createMetricName("MaxPoolSize"), new Gauge<Integer>()
         {
-            public Integer getValue()
+            public Integer value()
             {
                 return executor.maxWorkers;
             }
@@ -89,11 +98,11 @@ public class SEPMetrics
 
     public void release()
     {
-        Metrics.remove(factory.createMetricName("ActiveTasks"));
-        Metrics.remove(factory.createMetricName("PendingTasks"));
-        Metrics.remove(factory.createMetricName("CompletedTasks"));
-        Metrics.remove(factory.createMetricName("TotalBlockedTasks"));
-        Metrics.remove(factory.createMetricName("CurrentlyBlockedTasks"));
-        Metrics.remove(factory.createMetricName("MaxPoolSize"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("ActiveTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("PendingTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("CompletedTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("TotalBlockedTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("CurrentlyBlockedTasks"));
+        Metrics.defaultRegistry().removeMetric(factory.createMetricName("MaxPoolSize"));
     }
 }

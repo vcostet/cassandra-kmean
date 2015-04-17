@@ -19,13 +19,13 @@
 package org.apache.cassandra.utils;
 
 import org.apache.cassandra.AbstractSerializationsTester;
-import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.io.util.DataOutputStreamAndChannel;
 import org.apache.cassandra.service.StorageService;
-import org.junit.Assert;
+
 import org.junit.Test;
 
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 
 public class SerializationsTest extends AbstractSerializationsTester
@@ -33,16 +33,13 @@ public class SerializationsTest extends AbstractSerializationsTester
 
     private void testBloomFilterWrite(boolean offheap) throws IOException
     {
-        IPartitioner partitioner = StorageService.getPartitioner();
-        try (IFilter bf = FilterFactory.getFilter(1000000, 0.0001, offheap))
-        {
-            for (int i = 0; i < 100; i++)
-                bf.add(partitioner.decorateKey(partitioner.getTokenFactory().toByteArray(partitioner.getRandomToken())));
-            try (DataOutputStreamPlus out = getOutput("utils.BloomFilter.bin"))
-            {
-                FilterFactory.serialize(bf, out);
-            }
-        }
+        IFilter bf = FilterFactory.getFilter(1000000, 0.0001, offheap);
+        for (int i = 0; i < 100; i++)
+            bf.add(StorageService.getPartitioner().getTokenFactory().toByteArray(StorageService.getPartitioner().getRandomToken()));
+        DataOutputStreamAndChannel out = getOutput("utils.BloomFilter.bin");
+        FilterFactory.serialize(bf, out);
+        out.close();
+        bf.close();
     }
 
     @Test
@@ -51,11 +48,11 @@ public class SerializationsTest extends AbstractSerializationsTester
         if (EXECUTE_WRITES)
             testBloomFilterWrite(true);
 
-        try (DataInputStream in = getInput("utils.BloomFilter.bin");
-             IFilter filter = FilterFactory.deserialize(in, true))
-        {
-            Assert.assertNotNull(filter);
-        }
+        DataInputStream in = getInput("utils.BloomFilter.bin");
+        IFilter bf = FilterFactory.deserialize(in, true);
+        assert bf != null;
+        bf.close();
+        in.close();
     }
 
     private void testEstimatedHistogramWrite() throws IOException
@@ -72,12 +69,11 @@ public class SerializationsTest extends AbstractSerializationsTester
         data[offsets.length] = 100000;
         EstimatedHistogram hist2 = new EstimatedHistogram(offsets, data);
 
-        try (DataOutputStreamPlus out = getOutput("utils.EstimatedHistogram.bin"))
-        {
-            EstimatedHistogram.serializer.serialize(hist0, out);
-            EstimatedHistogram.serializer.serialize(hist1, out);
-            EstimatedHistogram.serializer.serialize(hist2, out);
-        }
+        DataOutputStreamAndChannel out = getOutput("utils.EstimatedHistogram.bin");
+        EstimatedHistogram.serializer.serialize(hist0, out);
+        EstimatedHistogram.serializer.serialize(hist1, out);
+        EstimatedHistogram.serializer.serialize(hist2, out);
+        out.close();
     }
 
     @Test
@@ -86,11 +82,10 @@ public class SerializationsTest extends AbstractSerializationsTester
         if (EXECUTE_WRITES)
             testEstimatedHistogramWrite();
 
-        try (DataInputStream in = getInput("utils.EstimatedHistogram.bin"))
-        {
-            Assert.assertNotNull(EstimatedHistogram.serializer.deserialize(in));
-            Assert.assertNotNull(EstimatedHistogram.serializer.deserialize(in));
-            Assert.assertNotNull(EstimatedHistogram.serializer.deserialize(in));
-        }
+        DataInputStream in = getInput("utils.EstimatedHistogram.bin");
+        assert EstimatedHistogram.serializer.deserialize(in) != null;
+        assert EstimatedHistogram.serializer.deserialize(in) != null;
+        assert EstimatedHistogram.serializer.deserialize(in) != null;
+        in.close();
     }
 }

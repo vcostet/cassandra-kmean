@@ -36,7 +36,7 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.compress.CompressionParameters;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
@@ -97,8 +97,8 @@ public class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
     public SSTableSimpleUnsortedWriter(File directory, CFMetaData metadata, IPartitioner partitioner, long bufferSizeInMB)
     {
         super(directory, metadata, partitioner);
-        bufferSize = bufferSizeInMB * 1024L * 1024L;
-        diskWriter.start();
+        this.bufferSize = bufferSizeInMB * 1024L * 1024L;
+        this.diskWriter.start();
     }
 
     protected void writeRow(DecoratedKey key, ColumnFamily columnFamily) throws IOException
@@ -119,10 +119,10 @@ public class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
 
         // We don't want to sync in writeRow() only as this might blow up the bufferSize for wide rows.
         if (currentSize > bufferSize)
-            sync();
+            replaceColumnFamily();
     }
 
-    protected ColumnFamily getColumnFamily()
+    protected ColumnFamily getColumnFamily() throws IOException
     {
         ColumnFamily previous = buffer.get(currentKey);
         // If the CF already exist in memory, we'll just continue adding to it
@@ -140,7 +140,7 @@ public class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
         return previous;
     }
 
-    protected ColumnFamily createColumnFamily()
+    protected ColumnFamily createColumnFamily() throws IOException
     {
         return ArrayBackedSortedColumns.factory.create(metadata);
     }
@@ -159,7 +159,13 @@ public class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
         }
     }
 
-    private void sync() throws IOException
+    // This is overridden by CQLSSTableWriter to hold off replacing column family until the next iteration through
+    protected void replaceColumnFamily() throws IOException
+    {
+        sync();
+    }
+
+    protected void sync() throws IOException
     {
         if (buffer.isEmpty())
             return;
@@ -210,10 +216,9 @@ public class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
         public void run()
         {
             SSTableWriter writer = null;
-
-            while (true)
+            try
             {
-                try
+                while (true)
                 {
                     Buffer b = writeQueue.take();
                     if (b == SENTINEL)
@@ -231,17 +236,14 @@ public class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
                     }
                     writer.close();
                 }
-                catch (Throwable e)
-                {
-                    JVMStabilityInspector.inspectThrowable(e);
-                    if (writer != null)
-                        writer.abort();
-                    // Keep only the first exception
-                    if (exception == null)
-                      exception = e;
-                }
             }
-
+            catch (Throwable e)
+            {
+                JVMStabilityInspector.inspectThrowable(e);
+                if (writer != null)
+                    writer.abort();
+                exception = e;
+            }
         }
     }
 }

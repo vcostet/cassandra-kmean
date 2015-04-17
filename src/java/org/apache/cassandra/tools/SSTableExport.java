@@ -22,10 +22,10 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.util.*;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.cli.*;
 
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.CellNameType;
@@ -115,7 +115,7 @@ public class SSTableExport
     }
 
     /**
-     * Serialize a given cell to a List of Objects that jsonMapper knows how to turn into strings.  Type is
+     * Serialize a given cell to a List of Objects that jsonMapper knows how to turn into strings.  Format is
      *
      * human_readable_name, value, timestamp, [flag, [options]]
      *
@@ -313,12 +313,12 @@ public class SSTableExport
 
     // This is necessary to accommodate the test suite since you cannot open a Reader more
     // than once from within the same process.
-    static void export(SSTableReader reader, PrintStream outs, String[] excludes) throws IOException
+    static void export(SSTableReader reader, PrintStream outs, String[] excludes, CFMetaData metadata) throws IOException
     {
         Set<String> excludeSet = new HashSet<String>();
 
         if (excludes != null)
-            excludeSet = new HashSet<>(Arrays.asList(excludes));
+            excludeSet = new HashSet<String>(Arrays.asList(excludes));
 
         SSTableIdentityIterator row;
         ISSTableScanner scanner = reader.getScanner();
@@ -361,11 +361,12 @@ public class SSTableExport
      * @param desc     the descriptor of the sstable to read from
      * @param outs     PrintStream to write the output to
      * @param excludes keys to exclude from export
+     * @param metadata Metadata to print keys in a proper format
      * @throws IOException on failure to read/write input/output
      */
-    public static void export(Descriptor desc, PrintStream outs, String[] excludes) throws IOException
+    public static void export(Descriptor desc, PrintStream outs, String[] excludes, CFMetaData metadata) throws IOException
     {
-        export(SSTableReader.open(desc), outs, excludes);
+        export(SSTableReader.open(desc), outs, excludes, metadata);
     }
 
     /**
@@ -373,11 +374,12 @@ public class SSTableExport
      *
      * @param desc     the descriptor of the sstable to read from
      * @param excludes keys to exclude from export
+     * @param metadata Metadata to print keys in a proper format
      * @throws IOException on failure to read/write SSTable/standard out
      */
-    public static void export(Descriptor desc, String[] excludes) throws IOException
+    public static void export(Descriptor desc, String[] excludes, CFMetaData metadata) throws IOException
     {
-        export(desc, System.out, excludes);
+        export(desc, System.out, excludes, metadata);
     }
 
     /**
@@ -385,6 +387,7 @@ public class SSTableExport
      * export the contents of the SSTable to JSON.
      *
      * @param args command lines arguments
+     * @throws IOException            on failure to open/read/write files or output streams
      * @throws ConfigurationException on configuration failure (wrong params given)
      */
     public static void main(String[] args) throws ConfigurationException
@@ -416,7 +419,7 @@ public class SSTableExport
         String[] excludes = cmd.getOptionValues(EXCLUDEKEY_OPTION);
         String ssTableFileName = new File(cmd.getArgs()[0]).getAbsolutePath();
 
-        Schema.instance.loadFromDisk(false);
+        DatabaseDescriptor.loadSchemas(false);
         Descriptor descriptor = Descriptor.fromFilename(ssTableFileName);
 
         // Start by validating keyspace name
@@ -444,7 +447,7 @@ public class SSTableExport
         }
         catch (IllegalArgumentException e)
         {
-            System.err.println(String.format("The provided table is not part of this cassandra keyspace: keyspace = %s, table = %s",
+            System.err.println(String.format("The provided column family is not part of this cassandra keyspace: keyspace = %s, column family = %s",
                                              descriptor.ksname, descriptor.cfname));
             System.exit(1);
         }
@@ -460,7 +463,7 @@ public class SSTableExport
                 if ((keys != null) && (keys.length > 0))
                     export(descriptor, System.out, Arrays.asList(keys), excludes, cfStore.metadata);
                 else
-                    export(descriptor, excludes);
+                    export(descriptor, excludes, cfStore.metadata);
             }
         }
         catch (IOException e)

@@ -18,6 +18,7 @@
 package org.apache.cassandra.hadoop;
 
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import org.apache.cassandra.thrift.*;
@@ -59,6 +60,7 @@ public class ColumnFamilyOutputFormat extends AbstractColumnFamilyOutputFormat<B
      * @param context
      *            the information about the current task.
      * @return a {@link RecordWriter} to write the output for the job.
+     * @throws IOException
      */
     public ColumnFamilyRecordWriter getRecordWriter(final TaskAttemptContext context) throws InterruptedException
     {

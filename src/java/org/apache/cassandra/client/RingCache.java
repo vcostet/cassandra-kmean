@@ -28,6 +28,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.hadoop.ConfigHelper;
 import org.apache.cassandra.thrift.Cassandra;
+import org.apache.cassandra.thrift.InvalidRequestException;
 import org.apache.cassandra.thrift.TokenRange;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.thrift.TException;
@@ -74,7 +75,7 @@ public class RingCache
             {
                 Token left = partitioner.getTokenFactory().fromString(range.start_token);
                 Token right = partitioner.getTokenFactory().fromString(range.end_token);
-                Range<Token> r = new Range<Token>(left, right);
+                Range<Token> r = new Range<Token>(left, right, partitioner);
                 for (String host : range.endpoints)
                 {
                     try
@@ -87,7 +88,7 @@ public class RingCache
                 }
             }
         }
-        catch (IOException e)
+        catch (InvalidRequestException | IOException e)
         {
             throw new RuntimeException(e);
         }

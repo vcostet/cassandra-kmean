@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.metrics;
 
+import com.yammer.metrics.core.MetricName;
+
 class ThreadPoolMetricNameFactory implements MetricNameFactory
 {
     private final String type;
@@ -30,7 +32,7 @@ class ThreadPoolMetricNameFactory implements MetricNameFactory
         this.poolName = poolName;
     }
 
-    public CassandraMetricsRegistry.MetricName createMetricName(String metricName)
+    public MetricName createMetricName(String metricName)
     {
         String groupName = ThreadPoolMetrics.class.getPackage().getName();
         StringBuilder mbeanName = new StringBuilder();
@@ -40,6 +42,6 @@ class ThreadPoolMetricNameFactory implements MetricNameFactory
         mbeanName.append(",scope=").append(poolName);
         mbeanName.append(",name=").append(metricName);
 
-        return new CassandraMetricsRegistry.MetricName(groupName, type, metricName, path + "." + poolName, mbeanName.toString());
+        return new MetricName(groupName, type, metricName, path + "." + poolName, mbeanName.toString());
     }
 }

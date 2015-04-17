@@ -83,7 +83,6 @@ class OptionReplication extends OptionMulti
                     break;
                 } catch (Exception ignore)
                 {
-                    // will throw below if strategy is still null
                 }
             }
             if (strategy == null)

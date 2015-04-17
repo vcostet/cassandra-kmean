@@ -18,6 +18,7 @@
 package org.apache.cassandra.thrift;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
@@ -29,34 +30,50 @@ import java.util.zip.Inflater;
 
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.common.primitives.Longs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.config.*;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.KSMetaData;
+import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.cql.CQLStatement;
+import org.apache.cassandra.cql.QueryProcessor;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.*;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.filter.ColumnSlice;
-import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.db.filter.IDiskAtomFilter;
+import org.apache.cassandra.db.filter.NamesQueryFilter;
+import org.apache.cassandra.db.filter.SliceQueryFilter;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.dht.*;
-import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.scheduler.IRequestScheduler;
 import org.apache.cassandra.serializers.MarshalException;
-import org.apache.cassandra.service.*;
+import org.apache.cassandra.service.CASRequest;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.QueryPagers;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.SemanticVersion;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.thrift.TException;
 
@@ -67,6 +84,8 @@ public class CassandraServer implements Cassandra.Iface
     private final static int COUNT_PAGE_SIZE = 1024;
 
     private final static List<ColumnOrSuperColumn> EMPTY_COLUMNS = Collections.emptyList();
+
+    private volatile boolean loggedCQL2Warning = false;
 
     /*
      * RequestScheduler to perform the scheduling of incoming requests
@@ -538,7 +557,7 @@ public class CassandraServer implements Cassandra.Iface
             // request by page if this is a large row
             if (cfs.getMeanColumns() > 0)
             {
-                int averageColumnSize = (int) (cfs.metric.meanRowSize.getValue() / cfs.getMeanColumns());
+                int averageColumnSize = (int) (cfs.getMeanRowSize() / cfs.getMeanColumns());
                 pageSize = Math.min(COUNT_PAGE_SIZE, 4 * 1024 * 1024 / averageColumnSize);
                 pageSize = Math.max(2, pageSize);
                 logger.debug("average row column size is {}; using pageSize of {}", averageColumnSize, pageSize);
@@ -579,6 +598,13 @@ public class CassandraServer implements Cassandra.Iface
         {
             Tracing.instance.stopSession();
         }
+    }
+
+    private static ByteBuffer getName(ColumnOrSuperColumn cosc)
+    {
+        return cosc.isSetSuper_column() ? cosc.super_column.name :
+                   (cosc.isSetColumn() ? cosc.column.name :
+                       (cosc.isSetCounter_column() ? cosc.counter_column.name : cosc.counter_super_column.name));
     }
 
     public Map<ByteBuffer, Integer> multiget_count(List<ByteBuffer> keys, ColumnParent column_parent, SlicePredicate predicate, ConsistencyLevel consistency_level)
@@ -1104,7 +1130,7 @@ public class CassandraServer implements Cassandra.Iface
         if (ksm == null)
             throw new NotFoundException();
 
-        return ThriftConversion.toThrift(ksm);
+        return ksm.toThrift();
     }
 
     public List<KeySlice> get_range_slices(ColumnParent column_parent, SlicePredicate predicate, KeyRange range, ConsistencyLevel consistency_level)
@@ -1147,12 +1173,12 @@ public class CassandraServer implements Cassandra.Iface
                 Token.TokenFactory tokenFactory = p.getTokenFactory();
                 Token left = tokenFactory.fromString(range.start_token);
                 Token right = tokenFactory.fromString(range.end_token);
-                bounds = Range.makeRowRange(left, right);
+                bounds = Range.makeRowRange(left, right, p);
             }
             else
             {
                 RowPosition end = range.end_key == null
-                                ? p.getTokenFactory().fromString(range.end_token).maxKeyBound()
+                                ? p.getTokenFactory().fromString(range.end_token).maxKeyBound(p)
                                 : RowPosition.ForKey.get(range.end_key, p);
                 bounds = new Bounds<RowPosition>(RowPosition.ForKey.get(range.start_key, p), end);
             }
@@ -1166,7 +1192,7 @@ public class CassandraServer implements Cassandra.Iface
                                                                         now,
                                                                         filter,
                                                                         bounds,
-                                                                        ThriftConversion.indexExpressionsFromThrift(range.row_filter),
+                                                                        ThriftConversion.fromThrift(range.row_filter),
                                                                         range.count),
                                                   consistencyLevel);
             }
@@ -1182,9 +1208,13 @@ public class CassandraServer implements Cassandra.Iface
         {
             throw ThriftConversion.toThrift(e);
         }
-        catch (RequestExecutionException e)
+        catch (ReadTimeoutException e)
         {
-            throw ThriftConversion.rethrow(e);
+            throw ThriftConversion.toThrift(e);
+        }
+        catch (org.apache.cassandra.exceptions.UnavailableException e)
+        {
+            throw ThriftConversion.toThrift(e);
         }
         finally
         {
@@ -1231,12 +1261,12 @@ public class CassandraServer implements Cassandra.Iface
                 Token.TokenFactory tokenFactory = p.getTokenFactory();
                 Token left = tokenFactory.fromString(range.start_token);
                 Token right = tokenFactory.fromString(range.end_token);
-                bounds = Range.makeRowRange(left, right);
+                bounds = Range.makeRowRange(left, right, p);
             }
             else
             {
                 RowPosition end = range.end_key == null
-                                ? p.getTokenFactory().fromString(range.end_token).maxKeyBound()
+                                ? p.getTokenFactory().fromString(range.end_token).maxKeyBound(p)
                                 : RowPosition.ForKey.get(range.end_key, p);
                 bounds = new Bounds<RowPosition>(RowPosition.ForKey.get(range.start_key, p), end);
             }
@@ -1264,9 +1294,13 @@ public class CassandraServer implements Cassandra.Iface
         {
             throw ThriftConversion.toThrift(e);
         }
-        catch (RequestExecutionException e)
+        catch (ReadTimeoutException e)
         {
-            throw ThriftConversion.rethrow(e);
+            throw ThriftConversion.toThrift(e);
+        }
+        catch (org.apache.cassandra.exceptions.UnavailableException e)
+        {
+            throw ThriftConversion.toThrift(e);
         }
         finally
         {
@@ -1326,7 +1360,7 @@ public class CassandraServer implements Cassandra.Iface
                                                               now,
                                                               filter,
                                                               bounds,
-                                                              ThriftConversion.indexExpressionsFromThrift(index_clause.expressions),
+                                                              ThriftConversion.fromThrift(index_clause.expressions),
                                                               index_clause.count);
 
             List<Row> rows = StorageProxy.getRangeSlice(command, consistencyLevel);
@@ -1336,9 +1370,13 @@ public class CassandraServer implements Cassandra.Iface
         {
             throw ThriftConversion.toThrift(e);
         }
-        catch (RequestExecutionException e)
+        catch (ReadTimeoutException e)
         {
-            throw ThriftConversion.rethrow(e);
+            throw ThriftConversion.toThrift(e);
+        }
+        catch (org.apache.cassandra.exceptions.UnavailableException e)
+        {
+            throw ThriftConversion.toThrift(e);
         }
         finally
         {
@@ -1452,11 +1490,12 @@ public class CassandraServer implements Cassandra.Iface
         }
     }
 
-    public void login(AuthenticationRequest auth_request) throws TException
+    public void login(AuthenticationRequest auth_request) throws AuthenticationException, AuthorizationException, TException
     {
         try
         {
-            state().login(DatabaseDescriptor.getAuthenticator().legacyAuthenticate(auth_request.getCredentials()));
+            AuthenticatedUser user = DatabaseDescriptor.getAuthenticator().authenticate(auth_request.getCredentials());
+            state().login(user);
         }
         catch (org.apache.cassandra.exceptions.AuthenticationException e)
         {
@@ -1498,7 +1537,7 @@ public class CassandraServer implements Cassandra.Iface
             String keyspace = cState.getKeyspace();
             cState.hasKeyspaceAccess(keyspace, Permission.CREATE);
             cf_def.unsetId(); // explicitly ignore any id set by client (Hector likes to set zero)
-            CFMetaData cfm = ThriftConversion.fromThrift(cf_def);
+            CFMetaData cfm = CFMetaData.fromThrift(cf_def);
             CFMetaData.validateCompactionOptions(cfm.compactionStrategyClass, cfm.compactionStrategyOptions);
             cfm.addDefaultIndexNames();
 
@@ -1558,7 +1597,7 @@ public class CassandraServer implements Cassandra.Iface
             for (CfDef cf_def : ks_def.cf_defs)
             {
                 cf_def.unsetId(); // explicitly ignore any id set by client (same as system_add_column_family)
-                CFMetaData cfm = ThriftConversion.fromThrift(cf_def);
+                CFMetaData cfm = CFMetaData.fromThrift(cf_def);
                 cfm.addDefaultIndexNames();
 
                 if (!cfm.getTriggers().isEmpty())
@@ -1566,7 +1605,7 @@ public class CassandraServer implements Cassandra.Iface
 
                 cfDefs.add(cfm);
             }
-            MigrationManager.announceNewKeyspace(ThriftConversion.fromThrift(ks_def, cfDefs.toArray(new CFMetaData[cfDefs.size()])));
+            MigrationManager.announceNewKeyspace(KSMetaData.fromThrift(ks_def, cfDefs.toArray(new CFMetaData[cfDefs.size()])));
             return Schema.instance.getVersion().toString();
         }
         catch (RequestValidationException e)
@@ -1608,9 +1647,9 @@ public class CassandraServer implements Cassandra.Iface
             state().hasKeyspaceAccess(ks_def.name, Permission.ALTER);
             ThriftValidation.validateKeyspace(ks_def.name);
             if (ks_def.getCf_defs() != null && ks_def.getCf_defs().size() > 0)
-                throw new InvalidRequestException("Keyspace update must not contain any table definitions.");
+                throw new InvalidRequestException("Keyspace update must not contain any column family definitions.");
 
-            MigrationManager.announceKeyspaceUpdate(ThriftConversion.fromThrift(ks_def));
+            MigrationManager.announceKeyspaceUpdate(KSMetaData.fromThrift(ks_def));
             return Schema.instance.getVersion().toString();
         }
         catch (RequestValidationException e)
@@ -1633,12 +1672,12 @@ public class CassandraServer implements Cassandra.Iface
             CFMetaData oldCfm = Schema.instance.getCFMetaData(cf_def.keyspace, cf_def.name);
 
             if (oldCfm == null)
-                throw new InvalidRequestException("Could not find table definition to modify.");
+                throw new InvalidRequestException("Could not find column family definition to modify.");
 
             if (!oldCfm.isThriftCompatible())
                 throw new InvalidRequestException("Cannot modify CQL3 table " + oldCfm.cfName + " as it may break the schema. You should use cqlsh to modify CQL3 tables instead.");
 
-            CFMetaData cfm = ThriftConversion.fromThriftForUpdate(cf_def, oldCfm);
+            CFMetaData cfm = CFMetaData.fromThriftForUpdate(cf_def, oldCfm);
             CFMetaData.validateCompactionOptions(cfm.compactionStrategyClass, cfm.compactionStrategyOptions);
             cfm.addDefaultIndexNames();
 
@@ -1860,20 +1899,70 @@ public class CassandraServer implements Cassandra.Iface
         {
             throw new InvalidRequestException("Error deflating query string.");
         }
-        catch (IOException e)
-        {
-            throw new AssertionError(e);
-        }
         return queryString;
     }
 
-    public CqlResult execute_cql_query(ByteBuffer query, Compression compression) throws TException
+    private void validateCQLVersion(int major) throws InvalidRequestException
     {
-        throw new InvalidRequestException("CQL2 has been removed in Cassandra 3.0. Please use CQL3 instead");
+        /*
+         * The rules are:
+         *   - If no version are set, we don't validate anything. The reason is
+         *     that 1) old CQL2 client might not have called set_cql_version
+         *     and 2) some client may have removed the set_cql_version for CQL3
+         *     when updating to 1.2.0. A CQL3 client upgrading from pre-1.2
+         *     shouldn't be in that case however since set_cql_version uses to
+         *     be mandatory (for CQL3).
+         *   - Otherwise, checks the major matches whatever was set.
+         */
+        SemanticVersion versionSet = state().getCQLVersion();
+        if (versionSet == null)
+            return;
+
+        if (versionSet.major != major)
+            throw new InvalidRequestException(
+                "Cannot execute/prepare CQL" + major + " statement since the CQL has been set to CQL" + versionSet.major
+              + "(This might mean your client hasn't been upgraded correctly to use the new CQL3 methods introduced in Cassandra 1.2+).");
     }
 
-    public CqlResult execute_cql3_query(ByteBuffer query, Compression compression, ConsistencyLevel cLevel) throws TException
+    public CqlResult execute_cql_query(ByteBuffer query, Compression compression)
+    throws InvalidRequestException, UnavailableException, TimedOutException, SchemaDisagreementException, TException
     {
+        validateCQLVersion(2);
+        maybeLogCQL2Warning();
+
+        try
+        {
+            String queryString = uncompress(query, compression);
+            if (startSessionIfRequested())
+            {
+                Tracing.instance.begin("execute_cql_query",
+                                       ImmutableMap.of("query", queryString));
+            }
+            else
+            {
+                logger.debug("execute_cql_query");
+            }
+
+            return QueryProcessor.process(queryString, state());
+        }
+        catch (RequestExecutionException e)
+        {
+            throw ThriftConversion.rethrow(e);
+        }
+        catch (RequestValidationException e)
+        {
+            throw ThriftConversion.toThrift(e);
+        }
+        finally
+        {
+            Tracing.instance.stopSession();
+        }
+    }
+
+    public CqlResult execute_cql3_query(ByteBuffer query, Compression compression, ConsistencyLevel cLevel)
+    throws InvalidRequestException, UnavailableException, TimedOutException, SchemaDisagreementException, TException
+    {
+        validateCQLVersion(3);
         try
         {
             String queryString = uncompress(query, compression);
@@ -1888,10 +1977,7 @@ public class CassandraServer implements Cassandra.Iface
             }
 
             ThriftClientState cState = state();
-            return ClientState.getCQLQueryHandler().process(queryString,
-                                                            cState.getQueryState(),
-                                                            QueryOptions.fromProtocolV2(ThriftConversion.fromThrift(cLevel), Collections.<ByteBuffer>emptyList()),
-                                                            null).toThriftResult();
+            return cState.getCQLQueryHandler().process(queryString, cState.getQueryState(), QueryOptions.fromProtocolV2(ThriftConversion.fromThrift(cLevel), Collections.<ByteBuffer>emptyList())).toThriftResult();
         }
         catch (RequestExecutionException e)
         {
@@ -1907,14 +1993,14 @@ public class CassandraServer implements Cassandra.Iface
         }
     }
 
-    public CqlPreparedResult prepare_cql_query(ByteBuffer query, Compression compression) throws TException
+    public CqlPreparedResult prepare_cql_query(ByteBuffer query, Compression compression)
+    throws InvalidRequestException, TException
     {
-        throw new InvalidRequestException("CQL2 has been removed in Cassandra 3.0. Please use CQL3 instead");
-    }
+        if (logger.isDebugEnabled())
+            logger.debug("prepare_cql_query");
 
-    public CqlPreparedResult prepare_cql3_query(ByteBuffer query, Compression compression) throws TException
-    {
-        logger.debug("prepare_cql3_query");
+        validateCQLVersion(2);
+        maybeLogCQL2Warning();
 
         String queryString = uncompress(query, compression);
         ThriftClientState cState = state();
@@ -1922,9 +2008,7 @@ public class CassandraServer implements Cassandra.Iface
         try
         {
             cState.validateLogin();
-            return ClientState.getCQLQueryHandler().prepare(queryString,
-                                                       cState.getQueryState(),
-                                                       null).toThriftPreparedResult();
+            return QueryProcessor.prepare(queryString, cState);
         }
         catch (RequestValidationException e)
         {
@@ -1932,51 +2016,25 @@ public class CassandraServer implements Cassandra.Iface
         }
     }
 
-    public CqlResult execute_prepared_cql_query(int itemId, List<ByteBuffer> bindVariables) throws TException
+    public CqlPreparedResult prepare_cql3_query(ByteBuffer query, Compression compression)
+    throws InvalidRequestException, TException
     {
-        throw new InvalidRequestException("CQL2 has been removed in Cassandra 3.0. Please use CQL3 instead");
-    }
+        if (logger.isDebugEnabled())
+            logger.debug("prepare_cql3_query");
 
-    public CqlResult execute_prepared_cql3_query(int itemId, List<ByteBuffer> bindVariables, ConsistencyLevel cLevel) throws TException
-    {
-        if (startSessionIfRequested())
-        {
-            // TODO we don't have [typed] access to CQL bind variables here.  CASSANDRA-4560 is open to add support.
-            Tracing.instance.begin("execute_prepared_cql3_query", Collections.<String, String>emptyMap());
-        }
-        else
-        {
-            logger.debug("execute_prepared_cql3_query");
-        }
+        validateCQLVersion(3);
+
+        String queryString = uncompress(query, compression);
+        ThriftClientState cState = state();
 
         try
         {
-            ThriftClientState cState = state();
-            ParsedStatement.Prepared prepared = ClientState.getCQLQueryHandler().getPreparedForThrift(itemId);
-
-            if (prepared == null)
-                throw new InvalidRequestException(String.format("Prepared query with ID %d not found" +
-                                                                " (either the query was not prepared on this host (maybe the host has been restarted?)" +
-                                                                " or you have prepared too many queries and it has been evicted from the internal cache)",
-                                                                itemId));
-            logger.trace("Retrieved prepared statement #{} with {} bind markers", itemId, prepared.statement.getBoundTerms());
-
-            return ClientState.getCQLQueryHandler().processPrepared(prepared.statement,
-                                                                    cState.getQueryState(),
-                                                                    QueryOptions.fromProtocolV2(ThriftConversion.fromThrift(cLevel), bindVariables),
-                                                                    null).toThriftResult();
-        }
-        catch (RequestExecutionException e)
-        {
-            throw ThriftConversion.rethrow(e);
+            cState.validateLogin();
+            return cState.getCQLQueryHandler().prepare(queryString, cState.getQueryState()).toThriftPreparedResult();
         }
         catch (RequestValidationException e)
         {
             throw ThriftConversion.toThrift(e);
-        }
-        finally
-        {
-            Tracing.instance.stopSession();
         }
     }
 
@@ -1997,7 +2055,7 @@ public class CassandraServer implements Cassandra.Iface
         {
             logger.debug("get_multi_slice");
         }
-        try 
+        try
         {
             ClientState cState = state();
             String keyspace = cState.getKeyspace();
@@ -2025,6 +2083,7 @@ public class CassandraServer implements Cassandra.Iface
                 }
                 slices[i] = new ColumnSlice(start, finish);
             }
+
             ColumnSlice[] deoverlapped = ColumnSlice.deoverlapSlices(slices, request.reversed ? metadata.comparator.reverseComparator() : metadata.comparator);
             SliceQueryFilter filter = new SliceQueryFilter(deoverlapped, request.reversed, request.count);
             ThriftValidation.validateKey(metadata, request.key);
@@ -2034,8 +2093,8 @@ public class CassandraServer implements Cassandra.Iface
         catch (RequestValidationException e)
         {
             throw ThriftConversion.toThrift(e);
-        } 
-        finally 
+        }
+        finally
         {
             Tracing.instance.stopSession();
         }
@@ -2052,11 +2111,118 @@ public class CassandraServer implements Cassandra.Iface
             columnSlice.setFinish(new byte[0]);
     }
 
-    /*
-     * No-op since 3.0.
-     */
-    public void set_cql_version(String version)
+    public CqlResult execute_prepared_cql_query(int itemId, List<ByteBuffer> bindVariables)
+    throws InvalidRequestException, UnavailableException, TimedOutException, SchemaDisagreementException, TException
     {
+        validateCQLVersion(2);
+        maybeLogCQL2Warning();
+
+        if (startSessionIfRequested())
+        {
+            // TODO we don't have [typed] access to CQL bind variables here.  CASSANDRA-4560 is open to add support.
+            Tracing.instance.begin("execute_prepared_cql_query", Collections.<String, String>emptyMap());
+        }
+        else
+        {
+            logger.debug("execute_prepared_cql_query");
+        }
+
+        try
+        {
+            ThriftClientState cState = state();
+            CQLStatement statement = cState.getPrepared().get(itemId);
+
+            if (statement == null)
+                throw new InvalidRequestException(String.format("Prepared query with ID %d not found", itemId));
+            logger.trace("Retrieved prepared statement #{} with {} bind markers", itemId, statement.boundTerms);
+
+            return QueryProcessor.processPrepared(statement, cState, bindVariables);
+        }
+        catch (RequestExecutionException e)
+        {
+            throw ThriftConversion.rethrow(e);
+        }
+        catch (RequestValidationException e)
+        {
+            throw ThriftConversion.toThrift(e);
+        }
+        finally
+        {
+            Tracing.instance.stopSession();
+        }
+    }
+
+    public CqlResult execute_prepared_cql3_query(int itemId, List<ByteBuffer> bindVariables, ConsistencyLevel cLevel)
+    throws InvalidRequestException, UnavailableException, TimedOutException, SchemaDisagreementException, TException
+    {
+        validateCQLVersion(3);
+
+        if (startSessionIfRequested())
+        {
+            // TODO we don't have [typed] access to CQL bind variables here.  CASSANDRA-4560 is open to add support.
+            Tracing.instance.begin("execute_prepared_cql3_query", Collections.<String, String>emptyMap());
+        }
+        else
+        {
+            logger.debug("execute_prepared_cql3_query");
+        }
+
+        try
+        {
+            ThriftClientState cState = state();
+            ParsedStatement.Prepared prepared = cState.getCQLQueryHandler().getPreparedForThrift(itemId);
+
+            if (prepared == null)
+                throw new InvalidRequestException(String.format("Prepared query with ID %d not found" +
+                                                                " (either the query was not prepared on this host (maybe the host has been restarted?)" +
+                                                                " or you have prepared too many queries and it has been evicted from the internal cache)",
+                                                                itemId));
+            logger.trace("Retrieved prepared statement #{} with {} bind markers", itemId, prepared.statement.getBoundTerms());
+
+            return cState.getCQLQueryHandler().processPrepared(prepared.statement,
+                                                               cState.getQueryState(),
+                                                               QueryOptions.fromProtocolV2(ThriftConversion.fromThrift(cLevel), bindVariables)).toThriftResult();
+        }
+        catch (RequestExecutionException e)
+        {
+            throw ThriftConversion.rethrow(e);
+        }
+        catch (RequestValidationException e)
+        {
+            throw ThriftConversion.toThrift(e);
+        }
+        finally
+        {
+            Tracing.instance.stopSession();
+        }
+    }
+
+    /*
+     * Deprecated, but if a client sets CQL2, it is a no-op for compatibility sake.
+     * If it sets CQL3 however, we throw an IRE because this mean the client
+     * hasn't been updated for Cassandra 1.2 and should start using the new
+     * execute_cql3_query, etc... and there is no point no warning it early.
+     */
+    public void set_cql_version(String version) throws InvalidRequestException
+    {
+        try
+        {
+            state().setCQLVersion(version);
+        }
+        catch (org.apache.cassandra.exceptions.InvalidRequestException e)
+        {
+            throw new InvalidRequestException(e.getMessage());
+        }
+    }
+
+    private void maybeLogCQL2Warning()
+    {
+        if (!loggedCQL2Warning)
+        {
+            logger.warn("CQL2 has been deprecated since Cassandra 2.0, and will be removed entirely in version 2.2."
+                        + " Please switch to CQL3 before then.");
+            loggedCQL2Warning = true;
+        }
     }
 
     public ByteBuffer trace_next_query() throws TException

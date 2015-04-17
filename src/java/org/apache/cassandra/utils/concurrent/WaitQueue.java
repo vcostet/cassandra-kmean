@@ -18,12 +18,16 @@
  */
 package org.apache.cassandra.utils.concurrent;
 
+import com.yammer.metrics.core.TimerContext;
+import org.slf4j.*;
+
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.locks.LockSupport;
-
-import com.codahale.metrics.Timer;
 
 /**
  * <p>A relatively easy to use utility for general purpose thread signalling.</p>
@@ -96,7 +100,7 @@ public final class WaitQueue
      * or the waiting thread is interrupted.
      * @return
      */
-    public Signal register(Timer.Context context)
+    public Signal register(TimerContext context)
     {
         assert context != null;
         RegisteredSignal signal = new TimedSignal(context);
@@ -389,9 +393,9 @@ public final class WaitQueue
      */
     private final class TimedSignal extends RegisteredSignal
     {
-        private final Timer.Context context;
+        private final TimerContext context;
 
-        private TimedSignal(Timer.Context context)
+        private TimedSignal(TimerContext context)
         {
             this.context = context;
         }

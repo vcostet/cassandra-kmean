@@ -20,10 +20,8 @@ package org.apache.cassandra.metrics;
 
 import java.util.concurrent.Callable;
 
-import com.codahale.metrics.Gauge;
-
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
-
+import com.yammer.metrics.Metrics;
+import com.yammer.metrics.core.Gauge;
 
 public class ClientMetrics
 {
@@ -37,14 +35,15 @@ public class ClientMetrics
 
     public void addCounter(String name, final Callable<Integer> provider)
     {
-        Metrics.register(factory.createMetricName(name), new Gauge<Integer>()
+        Metrics.newGauge(factory.createMetricName(name), new Gauge<Integer>()
         {
-            public Integer getValue()
+            public Integer value()
             {
                 try
                 {
                     return provider.call();
-                } catch (Exception e)
+                }
+                catch (Exception e)
                 {
                     throw new RuntimeException(e);
                 }

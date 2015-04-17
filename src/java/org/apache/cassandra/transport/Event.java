@@ -19,28 +19,13 @@ package org.apache.cassandra.transport;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.Iterator;
-import java.util.List;
-import java.util.UUID;
 
 import com.google.common.base.Objects;
 import io.netty.buffer.ByteBuf;
 
 public abstract class Event
 {
-    public enum Type {
-        TOPOLOGY_CHANGE(Server.VERSION_2),
-        STATUS_CHANGE(Server.VERSION_2),
-        SCHEMA_CHANGE(Server.VERSION_2),
-        TRACE_COMPLETE(Server.VERSION_4);
-
-        public final int minimumVersion;
-
-        Type(int minimumVersion)
-        {
-            this.minimumVersion = minimumVersion;
-        }
-    }
+    public enum Type { TOPOLOGY_CHANGE, STATUS_CHANGE, SCHEMA_CHANGE }
 
     public final Type type;
 
@@ -51,10 +36,7 @@ public abstract class Event
 
     public static Event deserialize(ByteBuf cb, int version)
     {
-        Type eventType = CBUtil.readEnumValue(Type.class, cb);
-        if (eventType.minimumVersion > version)
-            throw new ProtocolException("Event " + eventType.name() + " not valid for protocol version " + version);
-        switch (eventType)
+        switch (CBUtil.readEnumValue(Type.class, cb))
         {
             case TOPOLOGY_CHANGE:
                 return TopologyChange.deserializeEvent(cb, version);
@@ -62,16 +44,12 @@ public abstract class Event
                 return StatusChange.deserializeEvent(cb, version);
             case SCHEMA_CHANGE:
                 return SchemaChange.deserializeEvent(cb, version);
-            case TRACE_COMPLETE:
-                return TraceComplete.deserializeEvent(cb, version);
         }
         throw new AssertionError();
     }
 
     public void serialize(ByteBuf dest, int version)
     {
-        if (type.minimumVersion > version)
-            throw new ProtocolException("Event " + type.name() + " not valid for protocol version " + version);
         CBUtil.writeEnumValue(type, dest);
         serializeEvent(dest, version);
     }
@@ -226,29 +204,22 @@ public abstract class Event
     public static class SchemaChange extends Event
     {
         public enum Change { CREATED, UPDATED, DROPPED }
-        public enum Target { KEYSPACE, TABLE, TYPE, FUNCTION, AGGREGATE }
+        public enum Target { KEYSPACE, TABLE, TYPE }
 
         public final Change change;
         public final Target target;
         public final String keyspace;
-        public final String name;
-        public final List<String> argTypes;
+        public final String tableOrType;
 
-        public SchemaChange(Change change, Target target, String keyspace, String name, List<String> argTypes)
+        public SchemaChange(Change change, Target target, String keyspace, String tableOrType)
         {
             super(Type.SCHEMA_CHANGE);
             this.change = change;
             this.target = target;
             this.keyspace = keyspace;
-            this.name = name;
+            this.tableOrType = tableOrType;
             if (target != Target.KEYSPACE)
-                assert this.name != null : "Table, type, function or aggregate name should be set for non-keyspace schema change events";
-            this.argTypes = argTypes;
-        }
-
-        public SchemaChange(Change change, Target target, String keyspace, String name)
-        {
-            this(change, target, keyspace, name, null);
+                assert this.tableOrType != null : "Table or type should be set for non-keyspace schema change events";
         }
 
         public SchemaChange(Change change, String keyspace)
@@ -265,11 +236,7 @@ public abstract class Event
                 Target target = CBUtil.readEnumValue(Target.class, cb);
                 String keyspace = CBUtil.readString(cb);
                 String tableOrType = target == Target.KEYSPACE ? null : CBUtil.readString(cb);
-                List<String> argTypes = null;
-                if (target == Target.FUNCTION || target == Target.AGGREGATE)
-                    argTypes = CBUtil.readStringList(cb);
-
-                return new SchemaChange(change, target, keyspace, tableOrType, argTypes);
+                return new SchemaChange(change, target, keyspace, tableOrType);
             }
             else
             {
@@ -281,36 +248,13 @@ public abstract class Event
 
         public void serializeEvent(ByteBuf dest, int version)
         {
-            if (target == Target.FUNCTION || target == Target.AGGREGATE)
-            {
-                if (version >= 4)
-                {
-                    // available since protocol version 4
-                    CBUtil.writeEnumValue(change, dest);
-                    CBUtil.writeEnumValue(target, dest);
-                    CBUtil.writeString(keyspace, dest);
-                    CBUtil.writeString(name, dest);
-                    CBUtil.writeStringList(argTypes, dest);
-                }
-                else
-                {
-                    // not available in protocol versions < 4 - just say the keyspace was updated.
-                    CBUtil.writeEnumValue(Change.UPDATED, dest);
-                    if (version >= 3)
-                        CBUtil.writeEnumValue(Target.KEYSPACE, dest);
-                    CBUtil.writeString(keyspace, dest);
-                    CBUtil.writeString("", dest);
-                }
-                return;
-            }
-
             if (version >= 3)
             {
                 CBUtil.writeEnumValue(change, dest);
                 CBUtil.writeEnumValue(target, dest);
                 CBUtil.writeString(keyspace, dest);
                 if (target != Target.KEYSPACE)
-                    CBUtil.writeString(name, dest);
+                    CBUtil.writeString(tableOrType, dest);
             }
             else
             {
@@ -326,30 +270,13 @@ public abstract class Event
                 {
                     CBUtil.writeEnumValue(change, dest);
                     CBUtil.writeString(keyspace, dest);
-                    CBUtil.writeString(target == Target.KEYSPACE ? "" : name, dest);
+                    CBUtil.writeString(target == Target.KEYSPACE ? "" : tableOrType, dest);
                 }
             }
         }
 
         public int eventSerializedSize(int version)
         {
-            if (target == Target.FUNCTION || target == Target.AGGREGATE)
-            {
-                if (version >= 4)
-                    return CBUtil.sizeOfEnumValue(change)
-                               + CBUtil.sizeOfEnumValue(target)
-                               + CBUtil.sizeOfString(keyspace)
-                               + CBUtil.sizeOfString(name)
-                               + CBUtil.sizeOfStringList(argTypes);
-                if (version >= 3)
-                    return CBUtil.sizeOfEnumValue(Change.UPDATED)
-                           + CBUtil.sizeOfEnumValue(Target.KEYSPACE)
-                           + CBUtil.sizeOfString(keyspace);
-                return CBUtil.sizeOfEnumValue(Change.UPDATED)
-                       + CBUtil.sizeOfString(keyspace)
-                       + CBUtil.sizeOfString("");
-            }
-
             if (version >= 3)
             {
                 int size = CBUtil.sizeOfEnumValue(change)
@@ -357,7 +284,7 @@ public abstract class Event
                          + CBUtil.sizeOfString(keyspace);
 
                 if (target != Target.KEYSPACE)
-                    size += CBUtil.sizeOfString(name);
+                    size += CBUtil.sizeOfString(tableOrType);
 
                 return size;
             }
@@ -371,36 +298,20 @@ public abstract class Event
                 }
                 return CBUtil.sizeOfEnumValue(change)
                      + CBUtil.sizeOfString(keyspace)
-                     + CBUtil.sizeOfString(target == Target.KEYSPACE ? "" : name);
+                     + CBUtil.sizeOfString(target == Target.KEYSPACE ? "" : tableOrType);
             }
         }
 
         @Override
         public String toString()
         {
-            StringBuilder sb = new StringBuilder().append(change)
-                                                  .append(' ').append(target)
-                                                  .append(' ').append(keyspace);
-            if (name != null)
-                sb.append('.').append(name);
-            if (argTypes != null)
-            {
-                sb.append(" (");
-                for (Iterator<String> iter = argTypes.iterator(); iter.hasNext(); )
-                {
-                    sb.append(iter.next());
-                    if (iter.hasNext())
-                        sb.append(',');
-                }
-                sb.append(')');
-            }
-            return sb.toString();
+            return change + " " + target + " " + keyspace + (tableOrType == null ? "" : "." + tableOrType);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hashCode(change, target, keyspace, name, argTypes);
+            return Objects.hashCode(change, target, keyspace, tableOrType);
         }
 
         @Override
@@ -413,60 +324,7 @@ public abstract class Event
             return Objects.equal(change, scc.change)
                 && Objects.equal(target, scc.target)
                 && Objects.equal(keyspace, scc.keyspace)
-                && Objects.equal(name, scc.name)
-                && Objects.equal(argTypes, scc.argTypes);
-        }
-    }
-
-    /**
-     * @since native protocol v4
-     */
-    public static class TraceComplete extends Event
-    {
-        public final UUID traceSessionId;
-
-        public TraceComplete(UUID traceSessionId)
-        {
-            super(Type.TRACE_COMPLETE);
-            this.traceSessionId = traceSessionId;
-        }
-
-        public static Event deserializeEvent(ByteBuf cb, int version)
-        {
-            UUID traceSessionId = CBUtil.readUUID(cb);
-            return new TraceComplete(traceSessionId);
-        }
-
-        protected void serializeEvent(ByteBuf dest, int version)
-        {
-            CBUtil.writeUUID(traceSessionId, dest);
-        }
-
-        protected int eventSerializedSize(int version)
-        {
-            return CBUtil.sizeOfUUID(traceSessionId);
-        }
-
-        @Override
-        public String toString()
-        {
-            return traceSessionId.toString();
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hashCode(traceSessionId);
-        }
-
-        @Override
-        public boolean equals(Object other)
-        {
-            if (!(other instanceof TraceComplete))
-                return false;
-
-            TraceComplete tf = (TraceComplete)other;
-            return Objects.equal(traceSessionId, tf.traceSessionId);
+                && Objects.equal(tableOrType, scc.tableOrType);
         }
     }
 }

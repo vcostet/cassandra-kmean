@@ -29,7 +29,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 
 public class StreamRequest
 {
@@ -56,9 +55,8 @@ public class StreamRequest
             out.writeInt(request.ranges.size());
             for (Range<Token> range : request.ranges)
             {
-                MessagingService.validatePartitioner(range);
-                Token.serializer.serialize(range.left, out, version);
-                Token.serializer.serialize(range.right, out, version);
+                Token.serializer.serialize(range.left, out);
+                Token.serializer.serialize(range.right, out);
             }
             out.writeInt(request.columnFamilies.size());
             for (String cf : request.columnFamilies)
@@ -73,8 +71,8 @@ public class StreamRequest
             List<Range<Token>> ranges = new ArrayList<>(rangeCount);
             for (int i = 0; i < rangeCount; i++)
             {
-                Token left = Token.serializer.deserialize(in, MessagingService.globalPartitioner(), version);
-                Token right = Token.serializer.deserialize(in, MessagingService.globalPartitioner(), version);
+                Token left = Token.serializer.deserialize(in);
+                Token right = Token.serializer.deserialize(in);
                 ranges.add(new Range<>(left, right));
             }
             int cfCount = in.readInt();
@@ -91,8 +89,8 @@ public class StreamRequest
             size += TypeSizes.NATIVE.sizeof(request.ranges.size());
             for (Range<Token> range : request.ranges)
             {
-                size += Token.serializer.serializedSize(range.left, version);
-                size += Token.serializer.serializedSize(range.right, version);
+                size += Token.serializer.serializedSize(range.left, TypeSizes.NATIVE);
+                size += Token.serializer.serializedSize(range.right, TypeSizes.NATIVE);
             }
             size += TypeSizes.NATIVE.sizeof(request.columnFamilies.size());
             for (String cf : request.columnFamilies)

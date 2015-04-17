@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.net;
 
+import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.IOException;
@@ -42,8 +43,6 @@ import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
-import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CoalescingStrategies;
@@ -95,7 +94,7 @@ public class OutboundTcpConnection extends Thread
         case "MOVINGAVERAGE":
         case "FIXED":
         case "DISABLED":
-            logger.info("OutboundTcpConnection using coalescing strategy {}", strategy);
+            logger.info("OutboundTcpConnection using coalescing strategy " + strategy);
             break;
             default:
                 //Check that it can be loaded
@@ -104,7 +103,7 @@ public class OutboundTcpConnection extends Thread
 
         int coalescingWindow = DatabaseDescriptor.getOtcCoalescingWindow();
         if (coalescingWindow != Config.otc_coalescing_window_us_default)
-            logger.info("OutboundTcpConnection coalescing window set to {}μs", coalescingWindow);
+            logger.info("OutboundTcpConnection coalescing window set to " + coalescingWindow + "μs");
 
         if (coalescingWindow < 0)
             throw new ExceptionInInitializerError(
@@ -269,9 +268,7 @@ public class OutboundTcpConnection extends Thread
                 // session may have already finished; see CASSANDRA-5668
                 if (state == null)
                 {
-                    byte[] traceTypeBytes = qm.message.parameters.get(Tracing.TRACE_TYPE);
-                    Tracing.TraceType traceType = traceTypeBytes == null ? Tracing.TraceType.QUERY : Tracing.TraceType.deserialize(traceTypeBytes[0]);
-                    TraceState.mutateWithTracing(ByteBuffer.wrap(sessionBytes), message, -1, traceType.getTTL());
+                    TraceState.trace(ByteBuffer.wrap(sessionBytes), message, -1);
                 }
                 else
                 {
@@ -399,8 +396,7 @@ public class OutboundTcpConnection extends Thread
                         logger.warn("Failed to set send buffer size on internode socket.", se);
                     }
                 }
-
-                out = new BufferedDataOutputStreamPlus(socket.getChannel(), BUFFER_SIZE);
+                out = new DataOutputStreamPlus(new BufferedOutputStream(socket.getOutputStream(), BUFFER_SIZE));
 
                 out.writeInt(MessagingService.PROTOCOL_MAGIC);
                 writeHeader(out, targetVersion, shouldCompressConnection());
@@ -447,14 +443,14 @@ public class OutboundTcpConnection extends Thread
                     if (targetVersion < MessagingService.VERSION_21)
                     {
                         // Snappy is buffered, so no need for extra buffering output stream
-                        out = new WrappedDataOutputStreamPlus(new SnappyOutputStream(socket.getOutputStream()));
+                        out = new DataOutputStreamPlus(new SnappyOutputStream(socket.getOutputStream()));
                     }
                     else
                     {
                         // TODO: custom LZ4 OS that supports BB write methods
                         LZ4Compressor compressor = LZ4Factory.fastestInstance().fastCompressor();
                         Checksum checksum = XXHashFactory.fastestInstance().newStreamingHash32(LZ4_HASH_SEED).asChecksum();
-                        out = new WrappedDataOutputStreamPlus(new LZ4BlockOutputStream(socket.getOutputStream(),
+                        out = new DataOutputStreamPlus(new LZ4BlockOutputStream(socket.getOutputStream(),
                                                                             1 << 14,  // 16k block size
                                                                             compressor,
                                                                             checksum,

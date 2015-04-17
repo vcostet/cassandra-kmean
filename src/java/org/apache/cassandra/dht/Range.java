@@ -22,6 +22,7 @@ import java.util.*;
 
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.cassandra.db.RowPosition;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -37,7 +38,12 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
 
     public Range(T left, T right)
     {
-        super(left, right);
+        this(left, right, StorageService.getPartitioner());
+    }
+
+    public Range(T left, T right, IPartitioner partitioner)
+    {
+        super(left, right, partitioner);
     }
 
     public static <T extends RingPosition<T>> boolean contains(T left, T right, T point)
@@ -167,7 +173,8 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
             if (!(left.compareTo(that.right) < 0 && that.left.compareTo(right) < 0))
                 return Collections.emptySet();
             return rangeSet(new Range<T>(ObjectUtils.max(this.left, that.left),
-                                         ObjectUtils.min(this.right, that.right)));
+                                         ObjectUtils.min(this.right, that.right),
+                                         partitioner));
         }
         if (thiswraps && thatwraps)
         {
@@ -195,8 +202,8 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
     {
         Set<Range<T>> intersection = new HashSet<Range<T>>(2);
         if (that.right.compareTo(first.left) > 0)
-            intersection.add(new Range<T>(first.left, that.right));
-        intersection.add(new Range<T>(that.left, first.right));
+            intersection.add(new Range<T>(first.left, that.right, first.partitioner));
+        intersection.add(new Range<T>(that.left, first.right, first.partitioner));
         return Collections.unmodifiableSet(intersection);
     }
 
@@ -204,10 +211,10 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
     {
         Set<Range<T>> intersection = new HashSet<Range<T>>(2);
         if (other.contains(wrapping.right))
-            intersection.add(new Range<T>(other.left, wrapping.right));
+            intersection.add(new Range<T>(other.left, wrapping.right, wrapping.partitioner));
         // need the extra compareto here because ranges are asymmetrical; wrapping.left _is not_ contained by the wrapping range
         if (other.contains(wrapping.left) && wrapping.left.compareTo(other.right) < 0)
-            intersection.add(new Range<T>(wrapping.left, other.right));
+            intersection.add(new Range<T>(wrapping.left, other.right, wrapping.partitioner));
         return Collections.unmodifiableSet(intersection);
     }
 
@@ -218,8 +225,8 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         if (position.equals(left) || position.equals(right))
             return null;
 
-        AbstractBounds<T> lb = new Range<T>(left, position);
-        AbstractBounds<T> rb = new Range<T>(position, right);
+        AbstractBounds<T> lb = new Range<T>(left, position, partitioner);
+        AbstractBounds<T> rb = new Range<T>(position, right, partitioner);
         return Pair.create(lb, rb);
     }
 
@@ -235,12 +242,13 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
 
     public List<Range<T>> unwrap()
     {
-        T minValue = right.minValue();
+        @SuppressWarnings("unchecked")
+        T minValue = (T) partitioner.minValue(right.getClass());
         if (!isWrapAround() || right.equals(minValue))
             return Arrays.asList(this);
         List<Range<T>> unwrapped = new ArrayList<Range<T>>(2);
-        unwrapped.add(new Range<T>(left, minValue));
-        unwrapped.add(new Range<T>(minValue, right));
+        unwrapped.add(new Range<T>(left, minValue, partitioner));
+        unwrapped.add(new Range<T>(minValue, right, partitioner));
         return unwrapped;
     }
 
@@ -279,9 +287,9 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         ArrayList<Range<T>> difference = new ArrayList<Range<T>>(2);
 
         if (!left.equals(contained.left))
-            difference.add(new Range<T>(left, contained.left));
+            difference.add(new Range<T>(left, contained.left, partitioner));
         if (!right.equals(contained.right))
-            difference.add(new Range<T>(contained.right, right));
+            difference.add(new Range<T>(contained.right, right, partitioner));
         return difference;
     }
 
@@ -422,7 +430,8 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         Iterator<Range<T>> iter = ranges.iterator();
         Range<T> current = iter.next();
 
-        T min = (T) current.left.minValue();
+        @SuppressWarnings("unchecked")
+        T min = (T) current.partitioner.minValue(current.left.getClass());
         while (iter.hasNext())
         {
             // If current goes to the end of the ring, we're done
@@ -457,21 +466,29 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         return output;
     }
 
-    public AbstractBounds<T> withNewRight(T newRight)
-    {
-        return new Range<T>(left, newRight);
-    }
 
     /**
      * Compute a range of keys corresponding to a given range of token.
      */
-    public static Range<RowPosition> makeRowRange(Token left, Token right)
+    public static Range<RowPosition> makeRowRange(Token left, Token right, IPartitioner partitioner)
     {
-        return new Range<RowPosition>(left.maxKeyBound(), right.maxKeyBound());
+        return new Range<RowPosition>(left.maxKeyBound(partitioner), right.maxKeyBound(partitioner), partitioner);
     }
 
-    public static Range<RowPosition> makeRowRange(Range<Token> tokenBounds)
+    @SuppressWarnings("unchecked")
+    public AbstractBounds<RowPosition> toRowBounds()
     {
-        return makeRowRange(tokenBounds.left, tokenBounds.right);
+        return (left instanceof Token) ? makeRowRange((Token)left, (Token)right, partitioner) : (Range<RowPosition>)this;
+    }
+
+    @SuppressWarnings("unchecked")
+    public AbstractBounds<Token> toTokenBounds()
+    {
+        return (left instanceof RowPosition) ? new Range<Token>(((RowPosition)left).getToken(), ((RowPosition)right).getToken(), partitioner) : (Range<Token>)this;
+    }
+
+    public AbstractBounds<T> withNewRight(T newRight)
+    {
+        return new Range<T>(left, newRight);
     }
 }

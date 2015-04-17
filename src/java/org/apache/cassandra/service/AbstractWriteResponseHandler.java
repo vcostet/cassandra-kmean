@@ -20,11 +20,8 @@ package org.apache.cassandra.service;
 import java.net.InetAddress;
 import java.util.Collection;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.collect.Iterables;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -32,14 +29,11 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.net.IAsyncCallback;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
-public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackWithFailure<T>
+public abstract class AbstractWriteResponseHandler implements IAsyncCallback
 {
-    protected static final Logger logger = LoggerFactory.getLogger( AbstractWriteResponseHandler.class );
-
     private final SimpleCondition condition = new SimpleCondition();
     protected final Keyspace keyspace;
     protected final long start;
@@ -48,9 +42,6 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected final Runnable callback;
     protected final Collection<InetAddress> pendingEndpoints;
     private final WriteType writeType;
-    private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
-        = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
-    private volatile int failures = 0;
 
     /**
      * @param callback A callback to be called when the write is successful.
@@ -71,7 +62,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         this.writeType = writeType;
     }
 
-    public void get() throws WriteTimeoutException, WriteFailureException
+    public void get() throws WriteTimeoutException
     {
         long requestTimeout = writeType == WriteType.COUNTER
                             ? DatabaseDescriptor.getCounterWriteRpcTimeout()
@@ -91,8 +82,8 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
         if (!success)
         {
-            int blockedFor = totalBlockFor();
             int acks = ackCount();
+            int blockedFor = totalBlockFor();
             // It's pretty unlikely, but we can race between exiting await above and here, so
             // that we could now have enough acks. In that case, we "lie" on the acks count to
             // avoid sending confusing info to the user (see CASSANDRA-6491).
@@ -100,16 +91,8 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
                 acks = blockedFor - 1;
             throw new WriteTimeoutException(writeType, consistencyLevel, acks, blockedFor);
         }
-
-        if (totalBlockFor() + failures > totalEndpoints())
-        {
-            throw new WriteFailureException(consistencyLevel, ackCount(), failures, totalBlockFor(), writeType);
-        }
     }
 
-    /** 
-     * @return the minimum number of endpoints that must reply. 
-     */
     protected int totalBlockFor()
     {
         // During bootstrap, we have to include the pending endpoints or we may fail the consistency level
@@ -117,29 +100,10 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         return consistencyLevel.blockFor(keyspace) + pendingEndpoints.size();
     }
 
-    /** 
-     * @return the total number of endpoints the request has been sent to. 
-     */
-    protected int totalEndpoints()
-    {
-        return naturalEndpoints.size() + pendingEndpoints.size();
-    }
-
-    /**
-     * @return true if the message counts towards the totalBlockFor() threshold
-     */
-    protected boolean waitingFor(InetAddress from)
-    {
-        return true;
-    }
-
-    /**
-     * @return number of responses received
-     */
     protected abstract int ackCount();
 
     /** null message means "response from local write" */
-    public abstract void response(MessageIn<T> msg);
+    public abstract void response(MessageIn msg);
 
     public void assureSufficientLiveNodes() throws UnavailableException
     {
@@ -151,18 +115,5 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         condition.signalAll();
         if (callback != null)
             callback.run();
-    }
-
-    @Override
-    public void onFailure(InetAddress from)
-    {
-        logger.trace("Got failure from {}", from);
-
-        int n = waitingFor(from)
-              ? failuresUpdater.incrementAndGet(this)
-              : failures;
-
-        if (totalBlockFor() + n > totalEndpoints())
-            signal();
     }
 }

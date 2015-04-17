@@ -26,11 +26,13 @@ import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.NativeCell;
 import org.apache.cassandra.db.RangeTombstone;
+import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.filter.ColumnSlice;
 import org.apache.cassandra.db.filter.SliceQueryFilter;
 import org.apache.cassandra.db.marshal.AbstractCompositeType;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -78,10 +80,12 @@ public abstract class AbstractCType implements CType
 
     private final Serializer serializer;
 
+    private final ISerializer<IndexInfo> indexSerializer;
     private final IVersionedSerializer<ColumnSlice> sliceSerializer;
     private final IVersionedSerializer<SliceQueryFilter> sliceQueryFilterSerializer;
     private final DeletionInfo.Serializer deletionInfoSerializer;
     private final RangeTombstone.Serializer rangeTombstoneSerializer;
+    private final RowIndexEntry.Serializer rowIndexEntrySerializer;
 
     protected final boolean isByteOrderComparable;
 
@@ -111,10 +115,12 @@ public abstract class AbstractCType implements CType
 
         serializer = new Serializer(this);
 
+        indexSerializer = new IndexInfo.Serializer(this);
         sliceSerializer = new ColumnSlice.Serializer(this);
         sliceQueryFilterSerializer = new SliceQueryFilter.Serializer(this);
         deletionInfoSerializer = new DeletionInfo.Serializer(this);
         rangeTombstoneSerializer = new RangeTombstone.Serializer(this);
+        rowIndexEntrySerializer = new RowIndexEntry.Serializer(this);
         this.isByteOrderComparable = isByteOrderComparable;
     }
 
@@ -289,6 +295,11 @@ public abstract class AbstractCType implements CType
         return indexReverseComparator;
     }
 
+    public ISerializer<IndexInfo> indexSerializer()
+    {
+        return indexSerializer;
+    }
+
     public IVersionedSerializer<ColumnSlice> sliceSerializer()
     {
         return sliceSerializer;
@@ -307,6 +318,11 @@ public abstract class AbstractCType implements CType
     public RangeTombstone.Serializer rangeTombstoneSerializer()
     {
         return rangeTombstoneSerializer;
+    }
+
+    public RowIndexEntry.Serializer rowIndexEntrySerializer()
+    {
+        return rowIndexEntrySerializer;
     }
 
     @Override

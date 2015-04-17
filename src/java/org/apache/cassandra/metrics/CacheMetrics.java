@@ -17,14 +17,15 @@
  */
 package org.apache.cassandra.metrics;
 
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.codahale.metrics.Gauge;
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.RatioGauge;
-import org.apache.cassandra.cache.ICache;
+import com.yammer.metrics.Metrics;
+import com.yammer.metrics.core.Gauge;
+import com.yammer.metrics.core.Meter;
+import com.yammer.metrics.util.RatioGauge;
 
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
+import org.apache.cassandra.cache.ICache;
 
 /**
  * Metrics for {@code ICache}.
@@ -44,6 +45,9 @@ public class CacheMetrics
     /** Total number of cache entries */
     public final Gauge<Integer> entries;
 
+    private final AtomicLong lastRequests = new AtomicLong(0);
+    private final AtomicLong lastHits = new AtomicLong(0);
+
     /**
      * Create metrics for given cache.
      *
@@ -54,36 +58,57 @@ public class CacheMetrics
     {
         MetricNameFactory factory = new DefaultNameFactory("Cache", type);
 
-        capacity = Metrics.register(factory.createMetricName("Capacity"), new Gauge<Long>()
+        capacity = Metrics.newGauge(factory.createMetricName("Capacity"), new Gauge<Long>()
         {
-            public Long getValue()
+            public Long value()
             {
                 return cache.capacity();
             }
         });
-        hits = Metrics.meter(factory.createMetricName("Hits"));
-        requests = Metrics.meter(factory.createMetricName("Requests"));
-        hitRate = Metrics.register(factory.createMetricName("HitRate"), new RatioGauge()
+        hits = Metrics.newMeter(factory.createMetricName("Hits"), "hits", TimeUnit.SECONDS);
+        requests = Metrics.newMeter(factory.createMetricName("Requests"), "requests", TimeUnit.SECONDS);
+        hitRate = Metrics.newGauge(factory.createMetricName("HitRate"), new RatioGauge()
         {
-            @Override
-            public Ratio getRatio()
+            protected double getNumerator()
             {
-                return Ratio.of(hits.getCount(), requests.getCount());
+                return hits.count();
+            }
+
+            protected double getDenominator()
+            {
+                return requests.count();
             }
         });
-        size = Metrics.register(factory.createMetricName("Size"), new Gauge<Long>()
+        size = Metrics.newGauge(factory.createMetricName("Size"), new Gauge<Long>()
         {
-            public Long getValue()
+            public Long value()
             {
                 return cache.weightedSize();
             }
         });
-        entries = Metrics.register(factory.createMetricName("Entries"), new Gauge<Integer>()
+        entries = Metrics.newGauge(factory.createMetricName("Entries"), new Gauge<Integer>()
         {
-            public Integer getValue()
+            public Integer value()
             {
                 return cache.size();
             }
         });
+    }
+
+    // for backward compatibility
+    @Deprecated
+    public double getRecentHitRate()
+    {
+        long r = requests.count();
+        long h = hits.count();
+        try
+        {
+            return ((double)(h - lastHits.get())) / (r - lastRequests.get());
+        }
+        finally
+        {
+            lastRequests.set(r);
+            lastHits.set(h);
+        }
     }
 }

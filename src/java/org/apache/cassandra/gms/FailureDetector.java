@@ -230,7 +230,7 @@ public class FailureDetector implements IFailureDetector, FailureDetectorMBean
         long now = System.nanoTime();
         double phi = hbWnd.phi(now);
         if (logger.isTraceEnabled())
-            logger.trace("PHI for {} : {}", ep, phi);
+            logger.trace("PHI for " + ep + " : " + phi);
 
         if (PHI_FACTOR * phi > getPhiConvictThreshold())
         {
@@ -277,7 +277,7 @@ public class FailureDetector implements IFailureDetector, FailureDetectorMBean
         {
             ArrivalWindow hWnd = arrivalSamples.get(ep);
             sb.append(ep + " : ");
-            sb.append(hWnd);
+            sb.append(hWnd.toString());
             sb.append(System.getProperty("line.separator"));
         }
         sb.append("-----------------------------------------------------------------------");

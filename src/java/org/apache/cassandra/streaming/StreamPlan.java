@@ -38,6 +38,8 @@ public class StreamPlan
     private final long repairedAt;
     private final StreamCoordinator coordinator;
 
+    private StreamConnectionFactory connectionFactory = new DefaultConnectionFactory();
+
     private boolean flushBeforeTransfer = true;
 
     /**
@@ -47,19 +49,14 @@ public class StreamPlan
      */
     public StreamPlan(String description)
     {
-        this(description, ActiveRepairService.UNREPAIRED_SSTABLE, 1, false);
+        this(description, ActiveRepairService.UNREPAIRED_SSTABLE, 1);
     }
 
-    public StreamPlan(String description, boolean keepSSTableLevels)
-    {
-        this(description, ActiveRepairService.UNREPAIRED_SSTABLE, 1, keepSSTableLevels);
-    }
-
-    public StreamPlan(String description, long repairedAt, int connectionsPerHost, boolean keepSSTableLevels)
+    public StreamPlan(String description, long repairedAt, int connectionsPerHost)
     {
         this.description = description;
         this.repairedAt = repairedAt;
-        this.coordinator = new StreamCoordinator(connectionsPerHost, keepSSTableLevels, new DefaultConnectionFactory());
+        this.coordinator = new StreamCoordinator(connectionsPerHost, connectionFactory);
     }
 
     /**

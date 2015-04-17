@@ -25,7 +25,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.notifications.*;
@@ -49,15 +49,10 @@ public class DataTracker
     public final ColumnFamilyStore cfstore;
     private final AtomicReference<View> view;
 
-    // Indicates if it is safe to load the initial sstables (may not be true when running in
-    //standalone processes meant to repair or upgrade sstables (e.g. standalone scrubber)
-    public final boolean loadsstables;
-
-    public DataTracker(ColumnFamilyStore cfstore, boolean loadsstables)
+    public DataTracker(ColumnFamilyStore cfstore)
     {
         this.cfstore = cfstore;
         this.view = new AtomicReference<>();
-        this.loadsstables = loadsstables;
         this.init();
     }
 
@@ -197,12 +192,11 @@ public class DataTracker
      * unmarkCompacting, but since we will never call markObsolete on a sstable marked
      * as compacting (unless there is a serious bug), we can skip this.
      */
-    public boolean markCompacting(Iterable<SSTableReader> sstables)
+    public boolean markCompacting(Collection<SSTableReader> sstables)
     {
         return markCompacting(sstables, false, false);
     }
-
-    public boolean markCompacting(Iterable<SSTableReader> sstables, boolean newTables, boolean offline)
+    public boolean markCompacting(Collection<SSTableReader> sstables, boolean newTables, boolean offline)
     {
         assert sstables != null && !Iterables.isEmpty(sstables);
         while (true)
@@ -211,7 +205,7 @@ public class DataTracker
             if (Iterables.any(sstables, Predicates.in(currentView.compacting)))
                 return false;
 
-            Predicate<SSTableReader> live = new Predicate<SSTableReader>()
+            Predicate live = new Predicate<SSTableReader>()
             {
                 public boolean apply(SSTableReader sstable)
                 {
@@ -323,7 +317,7 @@ public class DataTracker
     public void replaceEarlyOpenedFiles(Collection<SSTableReader> toReplace, Collection<SSTableReader> replaceWith)
     {
         for (SSTableReader s : toReplace)
-            assert s.openReason == SSTableReader.OpenReason.EARLY;
+            assert s.openReason.equals(SSTableReader.OpenReason.EARLY);
         // note that we can replace an early opened file with a real one
         replaceReaders(toReplace, replaceWith, false);
     }
@@ -576,15 +570,10 @@ public class DataTracker
 
     public static SSTableIntervalTree buildIntervalTree(Iterable<SSTableReader> sstables)
     {
-        return new SSTableIntervalTree(buildIntervals(sstables));
-    }
-
-    public static List<Interval<RowPosition, SSTableReader>> buildIntervals(Iterable<SSTableReader> sstables)
-    {
         List<Interval<RowPosition, SSTableReader>> intervals = new ArrayList<>(Iterables.size(sstables));
         for (SSTableReader sstable : sstables)
             intervals.add(Interval.<RowPosition, SSTableReader>create(sstable.first, sstable.last, sstable));
-        return intervals;
+        return new SSTableIntervalTree(intervals);
     }
 
     public Set<SSTableReader> getCompacting()
@@ -598,7 +587,7 @@ public class DataTracker
 
         private SSTableIntervalTree(Collection<Interval<RowPosition, SSTableReader>> intervals)
         {
-            super(intervals);
+            super(intervals, null);
         }
 
         public static SSTableIntervalTree empty()
@@ -773,7 +762,7 @@ public class DataTracker
             return new View(liveMemtables, flushingMemtables, newSSTables, compacting, newShadowed, intervalTree);
         }
 
-        View markCompacting(Iterable<SSTableReader> tomark)
+        View markCompacting(Collection<SSTableReader> tomark)
         {
             Set<SSTableReader> compactingNew = ImmutableSet.<SSTableReader>builder().addAll(compacting).addAll(tomark).build();
             return new View(liveMemtables, flushingMemtables, sstablesMap, compactingNew, shadowed, intervalTree);
@@ -783,6 +772,22 @@ public class DataTracker
         {
             Set<SSTableReader> compactingNew = ImmutableSet.copyOf(Sets.difference(compacting, ImmutableSet.copyOf(tounmark)));
             return new View(liveMemtables, flushingMemtables, sstablesMap, compactingNew, shadowed, intervalTree);
+        }
+
+        private Set<SSTableReader> newSSTables(Collection<SSTableReader> oldSSTables, Iterable<SSTableReader> replacements)
+        {
+            ImmutableSet<SSTableReader> oldSet = ImmutableSet.copyOf(oldSSTables);
+            int newSSTablesSize = sstables.size() - oldSSTables.size() + Iterables.size(replacements);
+            assert newSSTablesSize >= Iterables.size(replacements) : String.format("Incoherent new size %d replacing %s by %s in %s", newSSTablesSize, oldSSTables, replacements, this);
+            Set<SSTableReader> newSSTables = new HashSet<>(newSSTablesSize);
+
+            for (SSTableReader sstable : sstables)
+                if (!oldSet.contains(sstable))
+                    newSSTables.add(sstable);
+
+            Iterables.addAll(newSSTables, replacements);
+            assert newSSTables.size() == newSSTablesSize : String.format("Expecting new size of %d, got %d while replacing %s by %s in %s", newSSTablesSize, newSSTables.size(), oldSSTables, replacements, this);
+            return ImmutableSet.copyOf(newSSTables);
         }
 
         @Override
@@ -795,7 +800,7 @@ public class DataTracker
         {
             if (intervalTree.isEmpty())
                 return Collections.emptyList();
-            RowPosition stopInTree = rowBounds.right.isMinimum() ? intervalTree.max() : rowBounds.right;
+            RowPosition stopInTree = rowBounds.right.isMinimum(liveMemtables.get(0).cfs.partitioner) ? intervalTree.max() : rowBounds.right;
             return intervalTree.search(Interval.<RowPosition, SSTableReader>create(rowBounds.left, stopInTree));
         }
     }

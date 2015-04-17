@@ -100,21 +100,21 @@ public abstract class UserTypes
                     continue;
 
                 ColumnSpecification fieldSpec = fieldSpecOf(receiver, i);
-                if (!value.testAssignment(keyspace, fieldSpec).isAssignable())
+                if (!value.isAssignableTo(keyspace, fieldSpec))
                     throw new InvalidRequestException(String.format("Invalid user type literal for %s: field %s is not of type %s", receiver, field, fieldSpec.type.asCQL3Type()));
             }
         }
 
-        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
             try
             {
                 validateAssignableTo(keyspace, receiver);
-                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                return true;
             }
             catch (InvalidRequestException e)
             {
-                return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+                return false;
             }
         }
 
@@ -146,15 +146,6 @@ public abstract class UserTypes
         {
             this.type = type;
             this.values = values;
-        }
-
-        public boolean usesFunction(String ksName, String functionName)
-        {
-            if (values != null)
-                for (Term value : values)
-                    if (value != null && value.usesFunction(ksName, functionName))
-                        return true;
-            return false;
         }
 
         public boolean containsBindMarker()

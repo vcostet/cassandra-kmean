@@ -49,35 +49,33 @@ public abstract class Constants
 
     public static final Term.Raw NULL_LITERAL = new Term.Raw()
     {
+        private final Term.Terminal NULL_VALUE = new Value(null)
+        {
+            @Override
+            public Terminal bind(QueryOptions options)
+            {
+                // We return null because that makes life easier for collections
+                return null;
+            }
+
+            @Override
+            public String toString()
+            {
+                return "null";
+            }
+        };
+
         public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
-            if (!testAssignment(keyspace, receiver).isAssignable())
+            if (!isAssignableTo(keyspace, receiver))
                 throw new InvalidRequestException("Invalid null value for counter increment/decrement");
 
             return NULL_VALUE;
         }
 
-        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
-            return receiver.type instanceof CounterColumnType
-                 ? AssignmentTestable.TestResult.NOT_ASSIGNABLE
-                 : AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-        }
-
-        @Override
-        public String toString()
-        {
-            return "null";
-        }
-    };
-
-    public static final Term.Terminal NULL_VALUE = new Value(null)
-    {
-        @Override
-        public Terminal bind(QueryOptions options)
-        {
-            // We return null because that makes life easier for collections
-            return null;
+            return !(receiver.type instanceof CounterColumnType);
         }
 
         @Override
@@ -131,7 +129,7 @@ public abstract class Constants
 
         public Value prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
-            if (!testAssignment(keyspace, receiver).isAssignable())
+            if (!isAssignableTo(keyspace, receiver))
                 throw new InvalidRequestException(String.format("Invalid %s constant (%s) for \"%s\" of type %s", type, text, receiver.name, receiver.type.asCQL3Type()));
 
             return new Value(parsedValue(receiver.type));
@@ -161,15 +159,15 @@ public abstract class Constants
             return text;
         }
 
-        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
             CQL3Type receiverType = receiver.type.asCQL3Type();
             if (receiverType.isCollection())
-                return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+                return false;
 
             if (!(receiverType instanceof CQL3Type.Native))
                 // Skip type validation for custom types. May or may not be a good idea
-                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                return true;
 
             CQL3Type.Native nt = (CQL3Type.Native)receiverType;
             switch (type)
@@ -184,9 +182,9 @@ public abstract class Constants
                         case DATE:
                         case TIME:
                         case TIMESTAMP:
-                            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                            return true;
                     }
-                    break;
+                    return false;
                 case INTEGER:
                     switch (nt)
                     {
@@ -199,42 +197,42 @@ public abstract class Constants
                         case INT:
                         case TIMESTAMP:
                         case VARINT:
-                            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                            return true;
                     }
-                    break;
+                    return false;
                 case UUID:
                     switch (nt)
                     {
                         case UUID:
                         case TIMEUUID:
-                            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                            return true;
                     }
-                    break;
+                    return false;
                 case FLOAT:
                     switch (nt)
                     {
                         case DECIMAL:
                         case DOUBLE:
                         case FLOAT:
-                            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                            return true;
                     }
-                    break;
+                    return false;
                 case BOOLEAN:
                     switch (nt)
                     {
                         case BOOLEAN:
-                            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                            return true;
                     }
-                    break;
+                    return false;
                 case HEX:
                     switch (nt)
                     {
                         case BLOB:
-                            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                            return true;
                     }
-                    break;
+                    return false;
             }
-            return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+            return false;
         }
 
         @Override
@@ -256,7 +254,7 @@ public abstract class Constants
             this.bytes = bytes;
         }
 
-        public ByteBuffer get(int protocolVersion)
+        public ByteBuffer get(QueryOptions options)
         {
             return bytes;
         }

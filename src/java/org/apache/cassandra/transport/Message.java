@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -147,7 +146,6 @@ public abstract class Message
     protected Connection connection;
     private int streamId;
     private Frame sourceFrame;
-    private Map<String, byte[]> customPayload;
 
     protected Message(Type type)
     {
@@ -183,16 +181,6 @@ public abstract class Message
     public Frame getSourceFrame()
     {
         return sourceFrame;
-    }
-
-    public Map<String, byte[]> getCustomPayload()
-    {
-        return customPayload;
-    }
-
-    public void setCustomPayload(Map<String, byte[]> customPayload)
-    {
-        this.customPayload = customPayload;
     }
 
     public static abstract class Request extends Message
@@ -251,20 +239,14 @@ public abstract class Message
         {
             boolean isRequest = frame.header.type.direction == Direction.REQUEST;
             boolean isTracing = frame.header.flags.contains(Frame.Header.Flag.TRACING);
-            boolean isCustomPayload = frame.header.flags.contains(Frame.Header.Flag.CUSTOM_PAYLOAD);
 
             UUID tracingId = isRequest || !isTracing ? null : CBUtil.readUUID(frame.body);
-            Map<String, byte[]> customPayload = !isCustomPayload ? null : CBUtil.readBytesMap(frame.body);
 
             try
             {
-                if (isCustomPayload && frame.header.version < Server.VERSION_4)
-                    throw new ProtocolException("Received frame with CUSTOM_PAYLOAD flag for native protocol version < 4");
-
                 Message message = frame.header.type.codec.decode(frame.body, frame.header.version);
                 message.setStreamId(frame.header.streamId);
                 message.setSourceFrame(frame);
-                message.setCustomPayload(customPayload);
 
                 if (isRequest)
                 {
@@ -312,41 +294,23 @@ public abstract class Message
                 if (message instanceof Response)
                 {
                     UUID tracingId = ((Response)message).getTracingId();
-                    Map<String, byte[]> customPayload = message.getCustomPayload();
-                    if (tracingId != null)
-                        messageSize += CBUtil.sizeOfUUID(tracingId);
-                    if (customPayload != null)
-                    {
-                        if (version < Server.VERSION_4)
-                            throw new ProtocolException("Must not send frame with CUSTOM_PAYLOAD flag for native protocol version < 4");
-                        messageSize += CBUtil.sizeOfBytesMap(customPayload);
-                    }
-                    body = CBUtil.allocator.buffer(messageSize);
                     if (tracingId != null)
                     {
+                        body = CBUtil.allocator.buffer(CBUtil.sizeOfUUID(tracingId) + messageSize);
                         CBUtil.writeUUID(tracingId, body);
                         flags.add(Frame.Header.Flag.TRACING);
                     }
-                    if (customPayload != null)
+                    else
                     {
-                        CBUtil.writeBytesMap(customPayload, body);
-                        flags.add(Frame.Header.Flag.CUSTOM_PAYLOAD);
+                        body = CBUtil.allocator.buffer(messageSize);
                     }
                 }
                 else
                 {
                     assert message instanceof Request;
+                    body = CBUtil.allocator.buffer(messageSize);
                     if (((Request)message).isTracingRequested())
                         flags.add(Frame.Header.Flag.TRACING);
-                    Map<String, byte[]> payload = message.getCustomPayload();
-                    if (payload != null)
-                        messageSize += CBUtil.sizeOfBytesMap(payload);
-                    body = CBUtil.allocator.buffer(messageSize);
-                    if (payload != null)
-                    {
-                        CBUtil.writeBytesMap(payload, body);
-                        flags.add(Frame.Header.Flag.CUSTOM_PAYLOAD);
-                    }
                 }
 
                 try
@@ -384,7 +348,7 @@ public abstract class Message
             }
         }
 
-        private static final class Flusher implements Runnable
+        private final class Flusher implements Runnable
         {
             final EventLoop eventLoop;
             final ConcurrentLinkedQueue<FlushItem> queued = new ConcurrentLinkedQueue<>();

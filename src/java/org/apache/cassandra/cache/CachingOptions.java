@@ -76,18 +76,18 @@ public class CachingOptions
             {
                 if (!(value.equals("ALL") || value.equals("NONE")))
                 {
-                    throw new ConfigurationException("'keys' can only have values 'ALL' or 'NONE', but was '" + value + "'");
+                    throw new ConfigurationException("'keys' can only have values 'ALL' or 'NONE'");
                 }
             }
             else if (entry.getKey().equals("rows_per_partition"))
             {
                 if (!(value.equals("ALL") || value.equals("NONE") || StringUtils.isNumeric(value)))
                 {
-                    throw new ConfigurationException("'rows_per_partition' can only have values 'ALL', 'NONE' or be numeric, but was '" + value + "'.");
+                    throw new ConfigurationException("'rows_per_partition' can only have values 'ALL', 'NONE' or be numeric.");
                 }
             }
             else
-                throw new ConfigurationException("Only supported CachingOptions parameters are 'keys' and 'rows_per_partition', but was '" + entry.getKey() + "'");
+                throw new ConfigurationException("Only supported CachingOptions parameters are 'keys' and 'rows_per_partition'");
         }
     }
 
@@ -130,7 +130,11 @@ public class CachingOptions
         return result;
     }
 
-    // FIXME: move to ThriftConversion
+    public static boolean isLegacy(String CachingOptions)
+    {
+        return legacyOptions.contains(CachingOptions.toUpperCase());
+    }
+
     public static CachingOptions fromThrift(String caching, String cellsPerRow) throws ConfigurationException
     {
 
@@ -149,7 +153,6 @@ public class CachingOptions
         return new CachingOptions(kc, rc);
     }
 
-    // FIXME: move to ThriftConversion
     public String toThriftCaching()
     {
         if (rowCache.isEnabled() && keyCache.isEnabled())
@@ -161,13 +164,13 @@ public class CachingOptions
         return "NONE";
     }
 
-    // FIXME: move to ThriftConversion
     public String toThriftCellsPerRow()
     {
         if (rowCache.cacheFullPartitions())
             return "ALL";
         return String.valueOf(rowCache.rowsToCache);
     }
+
 
     public static class KeyCache
     {
@@ -188,7 +191,7 @@ public class CachingOptions
 
         public boolean isEnabled()
         {
-            return type == Type.ALL;
+            return type.equals(Type.ALL);
         }
 
         @Override
@@ -223,7 +226,7 @@ public class CachingOptions
 
         public RowCache(Type type)
         {
-            this(type, (type == Type.ALL) ? Integer.MAX_VALUE : 0);
+            this(type, type.equals(Type.ALL) ? Integer.MAX_VALUE : 0);
         }
         public RowCache(Type type, int rowsToCache)
         {
@@ -246,17 +249,17 @@ public class CachingOptions
         }
         public boolean isEnabled()
         {
-            return (type == Type.ALL) || (type == Type.HEAD);
+            return type.equals(Type.ALL) || type.equals(Type.HEAD);
         }
         public boolean cacheFullPartitions()
         {
-            return type == Type.ALL;
+            return type.equals(Type.ALL);
         }
         @Override
         public String toString()
         {
-            if (type == Type.ALL) return "ALL";
-            if (type == Type.NONE) return "NONE";
+            if (type.equals(Type.ALL)) return "ALL";
+            if (type.equals(Type.NONE)) return "NONE";
             return String.valueOf(rowsToCache);
         }
 

@@ -26,7 +26,6 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -36,23 +35,18 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.IdentityQueryFilter;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.filter.IDiskAtomFilter;
 import org.apache.cassandra.db.filter.QueryFilter;
-import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.marshal.CounterColumnType;
-import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.sstable.SSTableUtils;
-import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
@@ -65,42 +59,16 @@ import static org.apache.cassandra.Util.cellname;
 import static org.apache.cassandra.Util.column;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
-public class StreamingTransferTest
+public class StreamingTransferTest extends SchemaLoader
 {
     private static final Logger logger = LoggerFactory.getLogger(StreamingTransferTest.class);
 
     public static final InetAddress LOCAL = FBUtilities.getBroadcastAddress();
-    public static final String KEYSPACE1 = "StreamingTransferTest1";
-    public static final String CF_STANDARD = "Standard1";
-    public static final String CF_COUNTER = "Counter1";
-    public static final String CF_STANDARDINT = "StandardInteger1";
-    public static final String CF_INDEX = "Indexed1";
-    public static final String KEYSPACE_CACHEKEY = "KeyStreamingTransferTestSpace";
-    public static final String CF_STANDARD2 = "Standard2";
-    public static final String CF_STANDARD3 = "Standard3";
-    public static final String KEYSPACE2 = "StreamingTransferTest2";
 
     @BeforeClass
-    public static void defineSchema() throws Exception
+    public static void setup() throws Exception
     {
-        SchemaLoader.prepareServer();
         StorageService.instance.initServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD),
-                                    CFMetaData.denseCFMetaData(KEYSPACE1, CF_COUNTER, BytesType.instance).defaultValidator(CounterColumnType.instance),
-                                    CFMetaData.denseCFMetaData(KEYSPACE1, CF_STANDARDINT, IntegerType.instance),
-                                    SchemaLoader.indexCFMD(KEYSPACE1, CF_INDEX, true));
-        SchemaLoader.createKeyspace(KEYSPACE2,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1));
-        SchemaLoader.createKeyspace(KEYSPACE_CACHEKEY,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE_CACHEKEY, CF_STANDARD),
-                                    SchemaLoader.standardCFMD(KEYSPACE_CACHEKEY, CF_STANDARD2),
-                                    SchemaLoader.standardCFMD(KEYSPACE_CACHEKEY, CF_STANDARD3));
     }
 
     /**
@@ -139,7 +107,7 @@ public class StreamingTransferTest
         ranges.add(new Range<>(p.getToken(ByteBufferUtil.bytes("key2")), p.getMinimumToken()));
 
         StreamResultFuture futureResult = new StreamPlan("StreamingTransferTest")
-                                                  .requestRanges(LOCAL, LOCAL, KEYSPACE2, ranges)
+                                                  .requestRanges(LOCAL, LOCAL, "Keyspace2", ranges)
                                                   .execute();
 
         UUID planId = futureResult.planId;
@@ -164,7 +132,7 @@ public class StreamingTransferTest
     private List<String> createAndTransfer(ColumnFamilyStore cfs, Mutator mutator, boolean transferSSTables) throws Exception
     {
         // write a temporary SSTable, and unregister it
-        logger.debug("Mutating {}", cfs.name);
+        logger.debug("Mutating " + cfs.name);
         long timestamp = 1234;
         for (int i = 1; i <= 3; i++)
             mutator.mutate("key" + i, "col" + i, timestamp);
@@ -173,7 +141,7 @@ public class StreamingTransferTest
         assertEquals(1, cfs.getSSTables().size());
 
         // transfer the first and last key
-        logger.debug("Transferring {}", cfs.name);
+        logger.debug("Transferring " + cfs.name);
         int[] offs;
         if (transferSSTables)
         {
@@ -212,7 +180,7 @@ public class StreamingTransferTest
         for (int off : offs)
             keys.add("key" + off);
 
-        logger.debug("... everything looks good for {}", cfs.name);
+        logger.debug("... everything looks good for " + cfs.name);
         return keys;
     }
 
@@ -253,7 +221,7 @@ public class StreamingTransferTest
 
     private void doTransferTable(boolean transferSSTables) throws Exception
     {
-        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final Keyspace keyspace = Keyspace.open("Keyspace1");
         final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Indexed1");
 
         List<String> keys = createAndTransfer(cfs, new Mutator()
@@ -264,9 +232,9 @@ public class StreamingTransferTest
                 ColumnFamily cf = ArrayBackedSortedColumns.factory.create(keyspace.getName(), cfs.name);
                 cf.addColumn(column(col, "v", timestamp));
                 cf.addColumn(new BufferCell(cellname("birthdate"), ByteBufferUtil.bytes(val), timestamp));
-                Mutation rm = new Mutation(KEYSPACE1, ByteBufferUtil.bytes(key), cf);
-                logger.debug("Applying row to transfer {}", rm);
-                rm.applyUnsafe();
+                Mutation rm = new Mutation("Keyspace1", ByteBufferUtil.bytes(key), cf);
+                logger.debug("Applying row to transfer " + rm);
+                rm.apply();
             }
         }, transferSSTables);
 
@@ -292,7 +260,7 @@ public class StreamingTransferTest
     @Test
     public void testTransferRangeTombstones() throws Exception
     {
-        String ks = KEYSPACE1;
+        String ks = "Keyspace1";
         String cfname = "StandardInteger1";
         Keyspace keyspace = Keyspace.open(ks);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
@@ -306,7 +274,7 @@ public class StreamingTransferTest
         // add RangeTombstones
         cf.delete(new DeletionInfo(cellname(2), cellname(3), cf.getComparator(), 1, (int) (System.currentTimeMillis() / 1000)));
         cf.delete(new DeletionInfo(cellname(5), cellname(7), cf.getComparator(), 1, (int) (System.currentTimeMillis() / 1000)));
-        rm.applyUnsafe();
+        rm.apply();
         cfs.forceBlockingFlush();
 
         SSTableReader sstable = cfs.getSSTables().iterator().next();
@@ -335,7 +303,7 @@ public class StreamingTransferTest
     @Test
     public void testTransferTableCounter() throws Exception
     {
-        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final Keyspace keyspace = Keyspace.open("Keyspace1");
         final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Counter1");
         final CounterContext cc = new CounterContext();
 
@@ -392,7 +360,7 @@ public class StreamingTransferTest
         content.add("test");
         content.add("test2");
         content.add("test3");
-        SSTableReader sstable = new SSTableUtils(KEYSPACE1, CF_STANDARD).prepare().write(content);
+        SSTableReader sstable = SSTableUtils.prepare().write(content);
         String keyspaceName = sstable.getKeyspaceName();
         String cfname = sstable.getColumnFamilyName();
 
@@ -431,7 +399,7 @@ public class StreamingTransferTest
     @Test
     public void testTransferOfMultipleColumnFamilies() throws Exception
     {
-        String keyspace = KEYSPACE_CACHEKEY;
+        String keyspace = "KeyCacheSpace";
         IPartitioner p = StorageService.getPartitioner();
         String[] columnFamilies = new String[] { "Standard1", "Standard2", "Standard3" };
         List<SSTableReader> ssTableReaders = new ArrayList<>();
@@ -480,7 +448,7 @@ public class StreamingTransferTest
     @Test
     public void testRandomSSTableTransfer() throws Exception
     {
-        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final Keyspace keyspace = Keyspace.open("Keyspace1");
         final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Standard1");
         Mutator mutator = new Mutator()
         {
@@ -489,9 +457,9 @@ public class StreamingTransferTest
                 ColumnFamily cf = ArrayBackedSortedColumns.factory.create(keyspace.getName(), cfs.name);
                 cf.addColumn(column(colName, "value", timestamp));
                 cf.addColumn(new BufferCell(cellname("birthdate"), ByteBufferUtil.bytes(new Date(timestamp).toString()), timestamp));
-                Mutation rm = new Mutation(KEYSPACE1, ByteBufferUtil.bytes(key), cf);
-                logger.debug("Applying row to transfer {}", rm);
-                rm.applyUnsafe();
+                Mutation rm = new Mutation("Keyspace1", ByteBufferUtil.bytes(key), cf);
+                logger.debug("Applying row to transfer " + rm);
+                rm.apply();
             }
         };
         // write a lot more data so the data is spread in more than 1 chunk.

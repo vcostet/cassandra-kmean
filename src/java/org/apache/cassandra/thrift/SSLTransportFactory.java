@@ -27,8 +27,6 @@ import java.util.Set;
 
 public class SSLTransportFactory implements ITransportFactory
 {
-    public static final int DEFAULT_MAX_FRAME_SIZE = 15 * 1024 * 1024; // 15 MiB
-
     public static final String TRUSTSTORE = "enc.truststore";
     public static final String TRUSTSTORE_PASSWORD = "enc.truststore.password";
     public static final String KEYSTORE = "enc.keystore";
@@ -59,7 +57,8 @@ public class SSLTransportFactory implements ITransportFactory
         if (null != keystore)
             params.setKeyStore(keystore, keystorePassword);
         TTransport trans = TSSLTransportFactory.getClientSocket(host, port, SOCKET_TIMEOUT, params);
-        return new TFramedTransport(trans, DEFAULT_MAX_FRAME_SIZE);
+        int frameSize = 15 * 1024 * 1024; // 15 MiB
+        return new TFramedTransport(trans, frameSize);
     }
 
     @Override

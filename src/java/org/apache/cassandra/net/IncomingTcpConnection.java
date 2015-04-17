@@ -30,13 +30,12 @@ import net.jpountz.lz4.LZ4BlockInputStream;
 import net.jpountz.lz4.LZ4FastDecompressor;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
+import org.xerial.snappy.SnappyInputStream;
 
 import org.apache.cassandra.config.Config;
-import org.xerial.snappy.SnappyInputStream;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.UnknownColumnFamilyException;
 import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.io.util.NIODataInputStream;
 
 public class IncomingTcpConnection extends Thread
 {
@@ -110,7 +109,7 @@ public class IncomingTcpConnection extends Thread
         DataOutputStream out = new DataOutputStream(socket.getOutputStream());
         out.writeInt(MessagingService.current_version);
         out.flush();
-        DataInput in = new DataInputStream(socket.getInputStream());
+        DataInputStream in = new DataInputStream(socket.getInputStream());
         int maxVersion = in.readInt();
 
         from = CompactEndpointSerializationHelper.deserialize(in);
@@ -136,7 +135,7 @@ public class IncomingTcpConnection extends Thread
         }
         else
         {
-            in = new NIODataInputStream(socket.getChannel(), BUFFER_SIZE);
+            in = new DataInputStream(new BufferedInputStream(socket.getInputStream(), BUFFER_SIZE));
         }
 
         if (version > MessagingService.current_version)
@@ -155,7 +154,7 @@ public class IncomingTcpConnection extends Thread
         }
     }
 
-    private InetAddress receiveMessage(DataInput input, int version) throws IOException
+    private InetAddress receiveMessage(DataInputStream input, int version) throws IOException
     {
         int id;
         if (version < MessagingService.VERSION_20)

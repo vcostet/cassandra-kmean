@@ -20,12 +20,13 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
 
+import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.dht.Token.KeyBound;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.MurmurHash;
-import org.apache.cassandra.utils.IFilter.FilterKey;
+import org.apache.cassandra.utils.FastByteOperations;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 
 /**
  * Represents a decorated key, handy for certain operations
@@ -36,7 +37,7 @@ import org.apache.cassandra.utils.IFilter.FilterKey;
  * if this matters, you can subclass RP to use a stronger hash, or use a non-lossy tokenization scheme (as in the
  * OrderPreservingPartitioner classes).
  */
-public abstract class DecoratedKey implements RowPosition, FilterKey
+public abstract class DecoratedKey implements RowPosition
 {
     public static final Comparator<DecoratedKey> comparator = new Comparator<DecoratedKey>()
     {
@@ -97,20 +98,15 @@ public abstract class DecoratedKey implements RowPosition, FilterKey
         return cmp == 0 ? ByteBufferUtil.compareUnsigned(key, otherKey.getKey()) : cmp;
     }
 
-    public IPartitioner getPartitioner()
+    public boolean isMinimum(IPartitioner partitioner)
     {
-        return getToken().getPartitioner();
-    }
-
-    public KeyBound minValue()
-    {
-        return getPartitioner().getMinimumToken().minKeyBound();
+        // A DecoratedKey can never be the minimum position on the ring
+        return false;
     }
 
     public boolean isMinimum()
     {
-        // A DecoratedKey can never be the minimum position on the ring
-        return false;
+        return isMinimum(StorageService.getPartitioner());
     }
 
     public RowPosition.Kind kind()
@@ -131,10 +127,4 @@ public abstract class DecoratedKey implements RowPosition, FilterKey
     }
 
     public abstract ByteBuffer getKey();
-
-    public void filterHash(long[] dest)
-    {
-        ByteBuffer key = getKey();
-        MurmurHash.hash3_x64_128(key, key.position(), key.remaining(), 0, dest);
-    }
 }

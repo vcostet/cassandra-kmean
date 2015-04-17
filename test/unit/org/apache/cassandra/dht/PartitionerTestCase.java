@@ -21,7 +21,6 @@ package org.apache.cassandra.dht;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import org.apache.cassandra.service.StorageService;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -123,10 +122,6 @@ public abstract class PartitionerTestCase
     @Test
     public void testDescribeOwnership()
     {
-        // This call initializes StorageService, needed to populate the keyspaces.
-        // TODO: This points to potential problems in the initialization sequence. Should be solved by CASSANDRA-7837.
-        StorageService.getPartitioner();
-
         try
         {
             testDescribeOwnershipWith(0);

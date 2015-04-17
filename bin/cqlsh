@@ -112,7 +112,7 @@ from cassandra.query import SimpleStatement, ordered_dict_factory
 from cassandra.policies import WhiteListRoundRobinPolicy
 from cassandra.protocol import QueryMessage, ResultMessage
 from cassandra.marshal import int16_pack, int32_pack, uint64_pack
-from cassandra.metadata import protect_name, protect_names, protect_value, KeyspaceMetadata, TableMetadata, ColumnMetadata
+from cassandra.metadata import protect_name, protect_names, protect_value
 from cassandra.auth import PlainTextAuthProvider
 
 # cqlsh should run correctly when run out of a Cassandra source tree,
@@ -771,31 +771,9 @@ class Shell(cmd.Cmd):
         ksmeta = self.get_keyspace_meta(ksname)
 
         if tablename not in ksmeta.tables:
-            if ksname == 'system_auth' and tablename in ['roles','role_permissions']:
-                self.get_fake_auth_table_meta(ksname, tablename)
-            else:
-                raise ColumnFamilyNotFound("Column family %r not found" % tablename)
-        else:
-            return ksmeta.tables[tablename]
+            raise ColumnFamilyNotFound("Column family %r not found" % tablename)
 
-    def get_fake_auth_table_meta(self, ksname, tablename):
-        # may be using external auth implementation so internal tables
-        # aren't actually defined in schema. In this case, we'll fake
-        # them up
-        if tablename == 'roles':
-            ks_meta = KeyspaceMetadata(ksname, True, None, None)
-            table_meta = TableMetadata(ks_meta, 'roles')
-            table_meta.columns['role'] = ColumnMetadata(table_meta, 'role', cassandra.cqltypes.UTF8Type)
-            table_meta.columns['is_superuser'] = ColumnMetadata(table_meta, 'is_superuser', cassandra.cqltypes.BooleanType)
-            table_meta.columns['can_login'] = ColumnMetadata(table_meta, 'can_login', cassandra.cqltypes.BooleanType)
-        elif tablename == 'role_permissions':
-            ks_meta = KeyspaceMetadata(ksname, True, None, None)
-            table_meta = TableMetadata(ks_meta, 'role_permissions')
-            table_meta.columns['role'] = ColumnMetadata(table_meta, 'role', cassandra.cqltypes.UTF8Type)
-            table_meta.columns['resource'] = ColumnMetadata(table_meta, 'resource', cassandra.cqltypes.UTF8Type)
-            table_meta.columns['permission'] = ColumnMetadata(table_meta, 'permission', cassandra.cqltypes.UTF8Type)
-        else:
-            raise ColumnFamilyNotFoundException("Column family %r not found" % tablename)
+        return ksmeta.tables[tablename]
 
     def get_usertypes_meta(self):
         data = self.session.execute("select * from system.schema_usertypes")
@@ -1047,10 +1025,10 @@ class Shell(cmd.Cmd):
 
         if statement.query_string[:6].lower() == 'select':
             self.print_result(rows, self.parse_for_table_meta(statement.query_string))
-        elif statement.query_string.lower().startswith("list users") or statement.query_string.lower().startswith("list roles"):
-            self.print_result(rows, self.get_table_meta('system_auth','roles'))
+        elif statement.query_string.lower().startswith("list users"):
+            self.print_result(rows, self.get_table_meta('system_auth','users'))
         elif statement.query_string.lower().startswith("list"):
-            self.print_result(rows, self.get_table_meta('system_auth','role_permissions'))
+            self.print_result(rows, self.get_table_meta('system_auth','permissions'))
         elif rows:
             # CAS INSERT/UPDATE
             self.writeresult("")
@@ -1609,7 +1587,7 @@ class Shell(cmd.Cmd):
         query = 'INSERT INTO %s.%s (%s) VALUES (%%s)' % (
             protect_name(ks),
             protect_name(cf),
-            ', '.join(columns))
+            ', '.join(protect_names(columns)))
 
         # we need to handle some types specially
         should_escape = [t in ('ascii', 'text', 'timestamp', 'date', 'time', 'inet') for t in cqltypes]

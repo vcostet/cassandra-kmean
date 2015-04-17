@@ -25,9 +25,8 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.auth.PasswordAuthenticator;
-import org.apache.cassandra.thrift.AuthenticationRequest;
-import org.apache.cassandra.thrift.Cassandra;
+import org.apache.cassandra.auth.IAuthenticator;
+import org.apache.cassandra.thrift.*;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.mapreduce.*;
 import org.apache.thrift.protocol.TBinaryProtocol;
@@ -68,6 +67,8 @@ public abstract class AbstractColumnFamilyOutputFormat<K, Y> extends OutputForma
      *
      * @param context
      *            information about the job
+     * @throws IOException
+     *             when output should not be attempted
      */
     public void checkOutputSpecs(JobContext context)
     {
@@ -135,8 +136,8 @@ public abstract class AbstractColumnFamilyOutputFormat<K, Y> extends OutputForma
     public static void login(String user, String password, Cassandra.Client client) throws Exception
     {
         Map<String, String> creds = new HashMap<String, String>();
-        creds.put(PasswordAuthenticator.USERNAME_KEY, user);
-        creds.put(PasswordAuthenticator.PASSWORD_KEY, password);
+        creds.put(IAuthenticator.USERNAME_KEY, user);
+        creds.put(IAuthenticator.PASSWORD_KEY, password);
         AuthenticationRequest authRequest = new AuthenticationRequest(creds);
         client.login(authRequest);
     }

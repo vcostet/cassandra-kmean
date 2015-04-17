@@ -31,8 +31,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.Pair;
@@ -45,9 +44,7 @@ public abstract class AbstractSSTableSimpleWriter implements Closeable
     protected ColumnFamily columnFamily;
     protected ByteBuffer currentSuperColumn;
     protected final CounterId counterid = CounterId.generate();
-    private SSTableFormat.Type formatType = DatabaseDescriptor.getSSTableFormat();
     protected static AtomicInteger generation = new AtomicInteger(0);
-
 
     public AbstractSSTableSimpleWriter(File directory, CFMetaData metadata, IPartitioner partitioner)
     {
@@ -56,25 +53,21 @@ public abstract class AbstractSSTableSimpleWriter implements Closeable
         DatabaseDescriptor.setPartitioner(partitioner);
     }
 
-    protected void setSSTableFormatType(SSTableFormat.Type type)
-    {
-        this.formatType = type;
-    }
-
     protected SSTableWriter getWriter()
     {
-        return SSTableWriter.create(createDescriptor(directory, metadata.ksName, metadata.cfName, formatType), 0, ActiveRepairService.UNREPAIRED_SSTABLE);
+        return new SSTableWriter(
+            makeFilename(directory, metadata.ksName, metadata.cfName),
+            0, // We don't care about the bloom filter
+            ActiveRepairService.UNREPAIRED_SSTABLE,
+            metadata,
+            DatabaseDescriptor.getPartitioner(),
+            new MetadataCollector(metadata.comparator));
     }
 
-    protected static Descriptor createDescriptor(File directory, final String keyspace, final String columnFamily, final SSTableFormat.Type fmt)
+    // find available generation and pick up filename from that
+    protected static String makeFilename(File directory, final String keyspace, final String columnFamily)
     {
-        int maxGen = getNextGeneration(directory, columnFamily);
-        return new Descriptor(directory, keyspace, columnFamily, maxGen + 1, Descriptor.Type.TEMP, fmt);
-    }
-
-    private static int getNextGeneration(File directory, final String columnFamily)
-    {
-        final Set<Descriptor> existing = new HashSet<>();
+        final Set<Descriptor> existing = new HashSet<Descriptor>();
         directory.list(new FilenameFilter()
         {
             public boolean accept(File dir, String name)
@@ -98,7 +91,8 @@ public abstract class AbstractSSTableSimpleWriter implements Closeable
                 maxGen = generation.getAndIncrement();
             }
         }
-        return maxGen;
+
+        return new Descriptor(directory, keyspace, columnFamily, maxGen + 1, Descriptor.Type.TEMP).filenameFor(Component.DATA);
     }
 
     /**
@@ -121,7 +115,7 @@ public abstract class AbstractSSTableSimpleWriter implements Closeable
     public void newSuperColumn(ByteBuffer name)
     {
         if (!columnFamily.metadata().isSuper())
-            throw new IllegalStateException("Cannot add a super column to a standard table");
+            throw new IllegalStateException("Cannot add a super column to a standard column family");
 
         currentSuperColumn = name;
     }
@@ -192,6 +186,15 @@ public abstract class AbstractSSTableSimpleWriter implements Closeable
     DecoratedKey currentKey()
     {
         return currentKey;
+    }
+
+    /**
+     * Package protected for use by AbstractCQLSSTableWriter.
+     * Not meant to be exposed publicly.
+     */
+    boolean shouldStartNewRow() throws IOException
+    {
+        return currentKey == null;
     }
 
     protected abstract void writeRow(DecoratedKey key, ColumnFamily columnFamily) throws IOException;

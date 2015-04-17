@@ -19,27 +19,31 @@ package org.apache.cassandra.utils;
 
 import java.io.*;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.math.BigInteger;
-import java.net.*;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.net.URL;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
-import java.util.concurrent.*;
-import java.util.zip.Adler32;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.zip.Checksum;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.AbstractIterator;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.auth.IAuthorizer;
-import org.apache.cassandra.auth.IRoleManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.IPartitioner;
@@ -47,11 +51,13 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.compress.CompressionParameters;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.IAllocator;
 import org.apache.cassandra.net.AsyncOneResponse;
-import org.apache.thrift.*;
+import org.apache.thrift.TBase;
+import org.apache.thrift.TDeserializer;
+import org.apache.thrift.TException;
+import org.apache.thrift.TSerializer;
 import org.codehaus.jackson.JsonFactory;
 import org.codehaus.jackson.map.ObjectMapper;
 
@@ -59,13 +65,15 @@ public class FBUtilities
 {
     private static final Logger logger = LoggerFactory.getLogger(FBUtilities.class);
 
-    private static final ObjectMapper jsonMapper = new ObjectMapper(new JsonFactory());
+    private static ObjectMapper jsonMapper = new ObjectMapper(new JsonFactory());
 
     public static final BigInteger TWO = new BigInteger("2");
     private static final String DEFAULT_TRIGGER_DIR = "triggers";
 
     private static final String OPERATING_SYSTEM = System.getProperty("os.name").toLowerCase();
+
     private static final boolean IS_WINDOWS = OPERATING_SYSTEM.contains("windows");
+
     private static final boolean HAS_PROCFS = !IS_WINDOWS && (new File(File.separator + "proc")).exists();
 
     private static volatile InetAddress localInetAddress;
@@ -409,7 +417,14 @@ public class FBUtilities
     {
         if (!partitionerClassName.contains("."))
             partitionerClassName = "org.apache.cassandra.dht." + partitionerClassName;
-        return FBUtilities.instanceOrConstruct(partitionerClassName, "partitioner");
+        return FBUtilities.construct(partitionerClassName, "partitioner");
+    }
+
+    public static IAllocator newOffHeapAllocator(String offheap_allocator) throws ConfigurationException
+    {
+        if (!offheap_allocator.contains("."))
+            offheap_allocator = "org.apache.cassandra.io.util." + offheap_allocator;
+        return FBUtilities.construct(offheap_allocator, "off-heap allocator");
     }
 
     public static IAuthorizer newAuthorizer(String className) throws ConfigurationException
@@ -424,13 +439,6 @@ public class FBUtilities
         if (!className.contains("."))
             className = "org.apache.cassandra.auth." + className;
         return FBUtilities.construct(className, "authenticator");
-    }
-
-    public static IRoleManager newRoleManager(String className) throws ConfigurationException
-    {
-        if (!className.contains("."))
-            className = "org.apache.cassandra.auth." + className;
-        return FBUtilities.construct(className, "role manager");
     }
 
     /**
@@ -461,35 +469,9 @@ public class FBUtilities
      * @param readable Descriptive noun for the role the class plays.
      * @throws ConfigurationException If the class cannot be found.
      */
-    public static <T> T instanceOrConstruct(String classname, String readable) throws ConfigurationException
-    {
-        Class<T> cls = FBUtilities.classForName(classname, readable);
-        try
-        {
-            Field instance = cls.getField("instance");
-            return cls.cast(instance.get(null));
-        }
-        catch (NoSuchFieldException | SecurityException | IllegalArgumentException | IllegalAccessException e)
-        {
-            // Could not get instance field. Try instantiating.
-            return construct(cls, classname, readable);
-        }
-    }
-
-    /**
-     * Constructs an instance of the given class, which must have a no-arg or default constructor.
-     * @param classname Fully qualified classname.
-     * @param readable Descriptive noun for the role the class plays.
-     * @throws ConfigurationException If the class cannot be found.
-     */
     public static <T> T construct(String classname, String readable) throws ConfigurationException
     {
         Class<T> cls = FBUtilities.classForName(classname, readable);
-        return construct(cls, classname, readable);
-    }
-
-    private static <T> T construct(Class<T> cls, String classname, String readable) throws ConfigurationException
-    {
         try
         {
             return cls.newInstance();
@@ -532,16 +514,19 @@ public class FBUtilities
      */
     public static Field getProtectedField(Class klass, String fieldName)
     {
+        Field field;
+
         try
         {
-            Field field = klass.getDeclaredField(fieldName);
+            field = klass.getDeclaredField(fieldName);
             field.setAccessible(true);
-            return field;
         }
         catch (Exception e)
         {
             throw new AssertionError(e);
         }
+
+        return field;
     }
 
     public static <T> CloseableIterator<T> closeableIterator(Iterator<T> iterator)
@@ -597,20 +582,17 @@ public class FBUtilities
             int errCode = p.waitFor();
             if (errCode != 0)
             {
-            	try (BufferedReader in = new BufferedReader(new InputStreamReader(p.getInputStream()));
-                     BufferedReader err = new BufferedReader(new InputStreamReader(p.getErrorStream())))
-                {
-            		String lineSep = System.getProperty("line.separator");
-	                StringBuilder sb = new StringBuilder();
-	                String str;
-	                while ((str = in.readLine()) != null)
-	                    sb.append(str).append(lineSep);
-	                while ((str = err.readLine()) != null)
-	                    sb.append(str).append(lineSep);
-	                throw new IOException("Exception while executing the command: "+ StringUtils.join(pb.command(), " ") +
-	                                      ", command error Code: " + errCode +
-	                                      ", command output: "+ sb.toString());
-                }
+                BufferedReader in = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                BufferedReader err = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+                StringBuilder sb = new StringBuilder();
+                String str;
+                while ((str = in.readLine()) != null)
+                    sb.append(str).append(System.getProperty("line.separator"));
+                while ((str = err.readLine()) != null)
+                    sb.append(str).append(System.getProperty("line.separator"));
+                throw new IOException("Exception while executing the command: "+ StringUtils.join(pb.command(), " ") +
+                                      ", command error Code: " + errCode +
+                                      ", command output: "+ sb.toString());
             }
         }
         catch (InterruptedException e)
@@ -625,68 +607,6 @@ public class FBUtilities
         checksum.update((v >>> 16) & 0xFF);
         checksum.update((v >>> 8) & 0xFF);
         checksum.update((v >>> 0) & 0xFF);
-    }
-
-    private static Method directUpdate;
-    static
-    {
-        try
-        {
-            directUpdate = Adler32.class.getDeclaredMethod("update", new Class[]{ByteBuffer.class});
-            directUpdate.setAccessible(true);
-        } catch (NoSuchMethodException e)
-        {
-            logger.warn("JVM doesn't support Adler32 byte buffer access");
-            directUpdate = null;
-        }
-    }
-
-    private static final ThreadLocal<byte[]> localDigestBuffer = new ThreadLocal<byte[]>()
-    {
-        @Override
-        protected byte[] initialValue()
-        {
-            return new byte[CompressionParameters.DEFAULT_CHUNK_LENGTH];
-        }
-    };
-
-    //Java 7 has this method but it's private till Java 8. Thanks JDK!
-    public static boolean supportsDirectChecksum()
-    {
-        return directUpdate != null;
-    }
-
-    public static void directCheckSum(Adler32 checksum, ByteBuffer bb)
-    {
-        if (directUpdate != null)
-        {
-            try
-            {
-                directUpdate.invoke(checksum, bb);
-                return;
-            }
-            catch (IllegalAccessException e)
-            {
-                directUpdate = null;
-                logger.warn("JVM doesn't support Adler32 byte buffer access");
-            }
-            catch (InvocationTargetException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-
-        //Fallback
-        byte[] buffer = localDigestBuffer.get();
-
-        int remaining;
-        while ((remaining = bb.remaining()) > 0)
-        {
-            remaining = Math.min(remaining, buffer.length);
-            ByteBufferUtil.arrayCopy(bb, bb.position(), buffer, 0, remaining);
-            bb.position(bb.position() + remaining);
-            checksum.update(buffer, 0, remaining);
-        }
     }
 
     public static long abs(long index)

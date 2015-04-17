@@ -17,49 +17,6 @@
  */
 package org.apache.cassandra.tools;
 
-import java.io.*;
-import java.lang.management.MemoryUsage;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.text.DecimalFormat;
-import java.text.SimpleDateFormat;
-import java.util.*;
-import java.util.Map.Entry;
-import java.util.concurrent.ExecutionException;
-
-import javax.management.InstanceNotFoundException;
-import javax.management.openmbean.*;
-
-import com.google.common.base.Joiner;
-import com.google.common.base.Throwables;
-import com.google.common.collect.*;
-
-import io.airlift.command.*;
-
-import org.apache.commons.lang3.ArrayUtils;
-import org.apache.commons.lang3.StringUtils;
-
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.db.ColumnFamilyStoreMBean;
-import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.compaction.CompactionManagerMBean;
-import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
-import org.apache.cassandra.metrics.CassandraMetricsRegistry;
-import org.apache.cassandra.metrics.ColumnFamilyMetrics;
-import org.apache.cassandra.net.MessagingServiceMBean;
-import org.apache.cassandra.repair.messages.RepairOption;
-import org.apache.cassandra.repair.RepairParallelism;
-import org.apache.cassandra.service.CacheServiceMBean;
-import org.apache.cassandra.streaming.ProgressInfo;
-import org.apache.cassandra.streaming.SessionInfo;
-import org.apache.cassandra.streaming.StreamState;
-import org.apache.cassandra.utils.EstimatedHistogram;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JVMStabilityInspector;
-
-import static org.apache.cassandra.metrics.ColumnFamilyMetrics.Sampler;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Throwables.getStackTraceAsString;
@@ -68,7 +25,82 @@ import static com.google.common.collect.Lists.newArrayList;
 import static java.lang.Integer.parseInt;
 import static java.lang.String.format;
 import static org.apache.commons.lang3.ArrayUtils.EMPTY_STRING_ARRAY;
-import static org.apache.commons.lang3.StringUtils.*;
+import static org.apache.commons.lang3.StringUtils.EMPTY;
+import static org.apache.commons.lang3.StringUtils.isEmpty;
+import static org.apache.commons.lang3.StringUtils.isNotEmpty;
+import static org.apache.commons.lang3.StringUtils.join;
+import io.airlift.command.Arguments;
+import io.airlift.command.Cli;
+import io.airlift.command.Command;
+import io.airlift.command.Help;
+import io.airlift.command.Option;
+import io.airlift.command.OptionType;
+import io.airlift.command.ParseArgumentsMissingException;
+import io.airlift.command.ParseArgumentsUnexpectedException;
+import io.airlift.command.ParseCommandMissingException;
+import io.airlift.command.ParseCommandUnrecognizedException;
+import io.airlift.command.ParseOptionConversionException;
+import io.airlift.command.ParseOptionMissingException;
+import io.airlift.command.ParseOptionMissingValueException;
+
+import java.io.Console;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileWriter;
+import java.io.IOError;
+import java.io.IOException;
+import java.lang.management.MemoryUsage;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.text.DecimalFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Scanner;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+
+import javax.management.InstanceNotFoundException;
+import javax.management.openmbean.CompositeData;
+import javax.management.openmbean.OpenDataException;
+import javax.management.openmbean.TabularData;
+import javax.management.openmbean.TabularDataSupport;
+
+import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutorMBean;
+import org.apache.cassandra.db.ColumnFamilyStoreMBean;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.compaction.CompactionManagerMBean;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
+import org.apache.cassandra.metrics.ColumnFamilyMetrics.Sampler;
+import org.apache.cassandra.net.MessagingServiceMBean;
+import org.apache.cassandra.repair.RepairParallelism;
+import org.apache.cassandra.service.CacheServiceMBean;
+import org.apache.cassandra.service.StorageProxyMBean;
+import org.apache.cassandra.streaming.ProgressInfo;
+import org.apache.cassandra.streaming.SessionInfo;
+import org.apache.cassandra.streaming.StreamState;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.commons.lang3.ArrayUtils;
+
+import com.google.common.base.Joiner;
+import com.google.common.base.Throwables;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.LinkedHashMultimap;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Ordering;
+import com.yammer.metrics.reporting.JmxReporter;
 
 public class NodeTool
 {
@@ -87,7 +119,6 @@ public class NodeTool
                 ClearSnapshot.class,
                 Compact.class,
                 Scrub.class,
-                Verify.class,
                 Flush.class,
                 UpgradeSSTable.class,
                 DisableAutoCompaction.class,
@@ -119,8 +150,8 @@ public class NodeTool
                 ProxyHistograms.class,
                 Rebuild.class,
                 Refresh.class,
+                RemoveToken.class,
                 RemoveNode.class,
-                Assassinate.class,
                 Repair.class,
                 SetCacheCapacity.class,
                 SetHintedHandoffThrottleInKB.class,
@@ -157,19 +188,11 @@ public class NodeTool
                 GetLoggingLevels.class
         );
 
-        Cli.CliBuilder<Runnable> builder = Cli.builder("nodetool");
-
-        builder.withDescription("Manage your Cassandra cluster")
-                 .withDefaultCommand(Help.class)
-                 .withCommands(commands);
-
-        // bootstrap commands
-        builder.withGroup("bootstrap")
-                .withDescription("Monitor/manage node's bootstrap process")
+        Cli<Runnable> parser = Cli.<Runnable>builder("nodetool")
+                .withDescription("Manage your Cassandra cluster")
                 .withDefaultCommand(Help.class)
-                .withCommand(BootstrapResume.class);
-
-        Cli<Runnable> parser = builder.build();
+                .withCommands(commands)
+                .build();
 
         int status = 0;
         try
@@ -263,7 +286,7 @@ public class NodeTool
             try (NodeProbe probe = connect())
             {
                 execute(probe);
-            }
+            } 
             catch (IOException e)
             {
                 throw new RuntimeException("Error while closing JMX connection", e);
@@ -333,15 +356,10 @@ public class NodeTool
 
         protected List<String> parseOptionalKeyspace(List<String> cmdArgs, NodeProbe nodeProbe)
         {
-            return parseOptionalKeyspace(cmdArgs, nodeProbe, false);
-        }
-
-        protected List<String> parseOptionalKeyspace(List<String> cmdArgs, NodeProbe nodeProbe, boolean includeSystemKS)
-        {
             List<String> keyspaces = new ArrayList<>();
 
             if (cmdArgs == null || cmdArgs.isEmpty())
-                keyspaces.addAll(includeSystemKS ? nodeProbe.getKeyspaces() : nodeProbe.getNonSystemKeyspaces());
+                keyspaces.addAll(nodeProbe.getKeyspaces());
             else
                 keyspaces.add(cmdArgs.get(0));
 
@@ -518,20 +536,20 @@ public class NodeTool
             try
             {
                 ownerships = probe.effectiveOwnership(keyspace);
-            }
+            } 
             catch (IllegalStateException ex)
             {
                 ownerships = probe.getOwnership();
                 errors.append("Note: " + ex.getMessage() + "%n");
                 showEffectiveOwnership = false;
-            }
+            } 
             catch (IllegalArgumentException ex)
             {
                 System.out.printf("%nError: " + ex.getMessage() + "%n");
                 return;
             }
 
-
+            
             System.out.println();
             for (Entry<String, SetHostStat> entry : getOwnershipByDc(probe, resolveIp, tokensToEndpoints, ownerships).entrySet())
                 printDc(probe, format, entry.getKey(), endpointsToTokens, entry.getValue(),showEffectiveOwnership);
@@ -681,31 +699,31 @@ public class NodeTool
                 long completed;
 
                 pending = 0;
-                for (int n : ms.getLargeMessagePendingTasks().values())
+                for (int n : ms.getCommandPendingTasks().values())
                     pending += n;
                 completed = 0;
-                for (long n : ms.getLargeMessageCompletedTasks().values())
+                for (long n : ms.getCommandCompletedTasks().values())
                     completed += n;
-                System.out.printf("%-25s%10s%10s%15s%n", "Large messages", "n/a", pending, completed);
+                System.out.printf("%-25s%10s%10s%15s%n", "Commands", "n/a", pending, completed);
 
                 pending = 0;
-                for (int n : ms.getSmallMessagePendingTasks().values())
+                for (int n : ms.getResponsePendingTasks().values())
                     pending += n;
                 completed = 0;
-                for (long n : ms.getSmallMessageCompletedTasks().values())
+                for (long n : ms.getResponseCompletedTasks().values())
                     completed += n;
-                System.out.printf("%-25s%10s%10s%15s%n", "Small messages", "n/a", pending, completed);
+                System.out.printf("%-25s%10s%10s%15s%n", "Responses", "n/a", pending, completed);
             }
         }
     }
 
-    @Command(name = "cfstats", description = "Print statistics on tables")
+    @Command(name = "cfstats", description = "Print statistics on column families")
     public static class CfStats extends NodeToolCmd
     {
-        @Arguments(usage = "[<keyspace.table>...]", description = "List of tables (or keyspace) names")
+        @Arguments(usage = "[<keyspace.cfname>...]", description = "List of column families (or keyspace) names")
         private List<String> cfnames = new ArrayList<>();
 
-        @Option(name = "-i", description = "Ignore the list of tables and display the remaining cfs")
+        @Option(name = "-i", description = "Ignore the list of column families and display the remaining cfs")
         private boolean ignore = false;
 
         @Option(title = "human_readable",
@@ -758,8 +776,8 @@ public class NodeTool
                 for (ColumnFamilyStoreMBean cfstore : columnFamilies)
                 {
                     String cfName = cfstore.getColumnFamilyName();
-                    long writeCount = ((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "WriteLatency")).getCount();
-                    long readCount = ((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "ReadLatency")).getCount();
+                    long writeCount = ((JmxReporter.TimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "WriteLatency")).getCount();
+                    long readCount = ((JmxReporter.TimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "ReadLatency")).getCount();
 
                     if (readCount > 0)
                     {
@@ -858,12 +876,12 @@ public class NodeTool
                     if (memtableOffHeapSize != null)
                         System.out.println("\t\tMemtable off heap memory used: " + format(memtableOffHeapSize, humanReadable));
                     System.out.println("\t\tMemtable switch count: " + probe.getColumnFamilyMetric(keyspaceName, cfName, "MemtableSwitchCount"));
-                    System.out.println("\t\tLocal read count: " + ((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "ReadLatency")).getCount());
-                    double localReadLatency = ((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "ReadLatency")).getMean() / 1000;
+                    System.out.println("\t\tLocal read count: " + ((JmxReporter.TimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "ReadLatency")).getCount());
+                    double localReadLatency = ((JmxReporter.TimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "ReadLatency")).getMean() / 1000;
                     double localRLatency = localReadLatency > 0 ? localReadLatency : Double.NaN;
                     System.out.printf("\t\tLocal read latency: %01.3f ms%n", localRLatency);
-                    System.out.println("\t\tLocal write count: " + ((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "WriteLatency")).getCount());
-                    double localWriteLatency = ((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "WriteLatency")).getMean() / 1000;
+                    System.out.println("\t\tLocal write count: " + ((JmxReporter.TimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "WriteLatency")).getCount());
+                    double localWriteLatency = ((JmxReporter.TimerMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "WriteLatency")).getMean() / 1000;
                     double localWLatency = localWriteLatency > 0 ? localWriteLatency : Double.NaN;
                     System.out.printf("\t\tLocal write latency: %01.3f ms%n", localWLatency);
                     System.out.println("\t\tPending flushes: " + probe.getColumnFamilyMetric(keyspaceName, cfName, "PendingFlushes"));
@@ -880,10 +898,10 @@ public class NodeTool
                     System.out.println("\t\tCompacted partition minimum bytes: " + format((Long) probe.getColumnFamilyMetric(keyspaceName, cfName, "MinRowSize"), humanReadable));
                     System.out.println("\t\tCompacted partition maximum bytes: " + format((Long) probe.getColumnFamilyMetric(keyspaceName, cfName, "MaxRowSize"), humanReadable));
                     System.out.println("\t\tCompacted partition mean bytes: " + format((Long) probe.getColumnFamilyMetric(keyspaceName, cfName, "MeanRowSize"), humanReadable));
-                    CassandraMetricsRegistry.JmxHistogramMBean histogram = (CassandraMetricsRegistry.JmxHistogramMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "LiveScannedHistogram");
+                    JmxReporter.HistogramMBean histogram = (JmxReporter.HistogramMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "LiveScannedHistogram");
                     System.out.println("\t\tAverage live cells per slice (last five minutes): " + histogram.getMean());
                     System.out.println("\t\tMaximum live cells per slice (last five minutes): " + histogram.getMax());
-                    histogram = (CassandraMetricsRegistry.JmxHistogramMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "TombstoneScannedHistogram");
+                    histogram = (JmxReporter.HistogramMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "TombstoneScannedHistogram");
                     System.out.println("\t\tAverage tombstones per slice (last five minutes): " + histogram.getMean());
                     System.out.println("\t\tMaximum tombstones per slice (last five minutes): " + histogram.getMax());
 
@@ -970,7 +988,7 @@ public class NodeTool
             {
                 for (String ks : filter.keySet())
                     if (verifier.get(ks).size() > 0)
-                        throw new IllegalArgumentException("Unknown tables: " + verifier.get(ks) + " in keyspace: " + ks);
+                        throw new IllegalArgumentException("Unknown column families: " + verifier.get(ks).toString() + " in keyspace: " + ks);
             }
         }
     }
@@ -985,7 +1003,7 @@ public class NodeTool
         @Option(name = "-k", description = "Number of the top partitions to list (Default: 10)")
         private int topCount = 10;
         @Option(name = "-a", description = "Comma separated list of samplers to use (Default: all)")
-        private String samplers = join(ColumnFamilyMetrics.Sampler.values(), ',');
+        private String samplers = join(Sampler.values(), ',');
         @Override
         public void execute(NodeProbe probe)
         {
@@ -1053,7 +1071,7 @@ public class NodeTool
     @Command(name = "cfhistograms", description = "Print statistic histograms for a given column family")
     public static class CfHistograms extends NodeToolCmd
     {
-        @Arguments(usage = "<keyspace> <table>", description = "The keyspace and table name")
+        @Arguments(usage = "<keyspace> <cfname>", description = "The keyspace and column family name")
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -1064,68 +1082,23 @@ public class NodeTool
             String keyspace = args.get(0);
             String cfname = args.get(1);
 
-            // calculate percentile of row size and column count
-            long[] estimatedRowSize = (long[]) probe.getColumnFamilyMetric(keyspace, cfname, "EstimatedRowSizeHistogram");
-            long[] estimatedColumnCount = (long[]) probe.getColumnFamilyMetric(keyspace, cfname, "EstimatedColumnCountHistogram");
+            ColumnFamilyStoreMBean store = probe.getCfsProxy(keyspace, cfname);
 
-            // build arrays to store percentile values
-            double[] estimatedRowSizePercentiles = new double[7];
-            double[] estimatedColumnCountPercentiles = new double[7];
-            double[] offsetPercentiles = new double[]{0.5, 0.75, 0.95, 0.98, 0.99};
+            long[] estimatedRowSizeHistogram = store.getEstimatedRowSizeHistogram();
+            long[] estimatedColumnCountHistogram = store.getEstimatedColumnCountHistogram();
 
-            if (ArrayUtils.isEmpty(estimatedRowSize) || ArrayUtils.isEmpty(estimatedColumnCount))
+            if (ArrayUtils.isEmpty(estimatedRowSizeHistogram) || ArrayUtils.isEmpty(estimatedColumnCountHistogram))
             {
                 System.err.println("No SSTables exists, unable to calculate 'Partition Size' and 'Cell Count' percentiles");
-
-                for (int i = 0; i < 7; i++)
-                {
-                    estimatedRowSizePercentiles[i] = Double.NaN;
-                    estimatedColumnCountPercentiles[i] = Double.NaN;
-                }
-            }
-            else
-            {
-                long[] rowSizeBucketOffsets = new EstimatedHistogram(estimatedRowSize.length).getBucketOffsets();
-                long[] columnCountBucketOffsets = new EstimatedHistogram(estimatedColumnCount.length).getBucketOffsets();
-                EstimatedHistogram rowSizeHist = new EstimatedHistogram(rowSizeBucketOffsets, estimatedRowSize);
-                EstimatedHistogram columnCountHist = new EstimatedHistogram(columnCountBucketOffsets, estimatedColumnCount);
-
-                if (rowSizeHist.isOverflowed())
-                {
-                    System.err.println(String.format("Row sizes are larger than %s, unable to calculate percentiles", rowSizeBucketOffsets[rowSizeBucketOffsets.length - 1]));
-                    for (int i = 0; i < offsetPercentiles.length; i++)
-                            estimatedRowSizePercentiles[i] = Double.NaN;
-                }
-                else
-                {
-                    for (int i = 0; i < offsetPercentiles.length; i++)
-                        estimatedRowSizePercentiles[i] = rowSizeHist.percentile(offsetPercentiles[i]);
-                }
-
-                if (columnCountHist.isOverflowed())
-                {
-                    System.err.println(String.format("Column counts are larger than %s, unable to calculate percentiles", columnCountBucketOffsets[columnCountBucketOffsets.length - 1]));
-                    for (int i = 0; i < estimatedColumnCountPercentiles.length; i++)
-                        estimatedColumnCountPercentiles[i] = Double.NaN;
-                }
-                else
-                {
-                    for (int i = 0; i < offsetPercentiles.length; i++)
-                        estimatedColumnCountPercentiles[i] = columnCountHist.percentile(offsetPercentiles[i]);
-                }
-
-                // min value
-                estimatedRowSizePercentiles[5] = rowSizeHist.min();
-                estimatedColumnCountPercentiles[5] = columnCountHist.min();
-                // max value
-                estimatedRowSizePercentiles[6] = rowSizeHist.max();
-                estimatedColumnCountPercentiles[6] = columnCountHist.max();
             }
 
+            // calculate percentile of row size and column count
             String[] percentiles = new String[]{"50%", "75%", "95%", "98%", "99%", "Min", "Max"};
-            double[] readLatency = probe.metricPercentilesAsArray((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspace, cfname, "ReadLatency"));
-            double[] writeLatency = probe.metricPercentilesAsArray((CassandraMetricsRegistry.JmxTimerMBean) probe.getColumnFamilyMetric(keyspace, cfname, "WriteLatency"));
-            double[] sstablesPerRead = probe.metricPercentilesAsArray((CassandraMetricsRegistry.JmxHistogramMBean) probe.getColumnFamilyMetric(keyspace, cfname, "SSTablesPerReadHistogram"));
+            double[] readLatency = probe.metricPercentilesAsArray(store.getRecentReadLatencyHistogramMicros());
+            double[] writeLatency = probe.metricPercentilesAsArray(store.getRecentWriteLatencyHistogramMicros());
+            double[] estimatedRowSizePercentiles = probe.metricPercentilesAsArray(estimatedRowSizeHistogram);
+            double[] estimatedColumnCountPercentiles = probe.metricPercentilesAsArray(estimatedColumnCountHistogram);
+            double[] sstablesPerRead = probe.metricPercentilesAsArray(store.getRecentSSTablesPerReadHistogram());
 
             System.out.println(format("%s/%s histograms", keyspace, cfname));
             System.out.println(format("%-10s%10s%18s%18s%18s%18s",
@@ -1150,7 +1123,7 @@ public class NodeTool
     @Command(name = "cleanup", description = "Triggers the immediate cleanup of keys no longer belonging to a node. By default, clean all keyspaces")
     public static class Cleanup extends NodeToolCmd
     {
-        @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
+        @Arguments(usage = "[<keyspace> <cfnames>...]", description = "The keyspace followed by one or many column families")
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -1161,7 +1134,7 @@ public class NodeTool
 
             for (String keyspace : keyspaces)
             {
-                if (SystemKeyspace.NAME.equals(keyspace))
+                if (Keyspace.SYSTEM_KS.equals(keyspace))
                     continue;
 
                 try
@@ -1211,14 +1184,11 @@ public class NodeTool
         }
     }
 
-    @Command(name = "compact", description = "Force a (major) compaction on one or more tables")
+    @Command(name = "compact", description = "Force a (major) compaction on one or more column families")
     public static class Compact extends NodeToolCmd
     {
-        @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
+        @Arguments(usage = "[<keyspace> <cfnames>...]", description = "The keyspace followed by one or many column families")
         private List<String> args = new ArrayList<>();
-
-        @Option(title = "split_output", name = {"-s", "--split-output"}, description = "Use -s to not create a single big file")
-        private boolean splitOutput = false;
 
         @Override
         public void execute(NodeProbe probe)
@@ -1230,7 +1200,7 @@ public class NodeTool
             {
                 try
                 {
-                    probe.forceKeyspaceCompaction(splitOutput, keyspace, cfnames);
+                    probe.forceKeyspaceCompaction(keyspace, cfnames);
                 } catch (Exception e)
                 {
                     throw new RuntimeException("Error occurred during compaction", e);
@@ -1239,10 +1209,10 @@ public class NodeTool
         }
     }
 
-    @Command(name = "flush", description = "Flush one or more tables")
+    @Command(name = "flush", description = "Flush one or more column families")
     public static class Flush extends NodeToolCmd
     {
-        @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
+        @Arguments(usage = "[<keyspace> <cfnames>...]", description = "The keyspace followed by one or many column families")
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -1264,10 +1234,10 @@ public class NodeTool
         }
     }
 
-    @Command(name = "scrub", description = "Scrub (rebuild sstables for) one or more tables")
+    @Command(name = "scrub", description = "Scrub (rebuild sstables for) one or more column families")
     public static class Scrub extends NodeToolCmd
     {
-        @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
+        @Arguments(usage = "[<keyspace> <cfnames>...]", description = "The keyspace followed by one or many column families")
         private List<String> args = new ArrayList<>();
 
         @Option(title = "disable_snapshot",
@@ -1291,51 +1261,18 @@ public class NodeTool
                 try
                 {
                     probe.scrub(System.out, disableSnapshot, skipCorrupted, keyspace, cfnames);
-                } catch (IllegalArgumentException e)
-                {
-                    throw e;
                 } catch (Exception e)
                 {
-                    throw new RuntimeException("Error occurred during scrubbing", e);
+                    throw new RuntimeException("Error occurred during flushing", e);
                 }
             }
         }
     }
 
-    @Command(name = "verify", description = "Verify (check data checksum for) one or more tables")
-    public static class Verify extends NodeToolCmd
-    {
-        @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
-        private List<String> args = new ArrayList<>();
-
-        @Option(title = "extended_verify",
-            name = {"-e", "--extended-verify"},
-            description = "Verify each cell data, beyond simply checking sstable checksums")
-        private boolean extendedVerify = false;
-
-        @Override
-        public void execute(NodeProbe probe)
-        {
-            List<String> keyspaces = parseOptionalKeyspace(args, probe);
-            String[] cfnames = parseOptionalColumnFamilies(args);
-
-            for (String keyspace : keyspaces)
-            {
-                try
-                {
-                    probe.verify(System.out, extendedVerify, keyspace, cfnames);
-                } catch (Exception e)
-                {
-                    throw new RuntimeException("Error occurred during verifying", e);
-                }
-            }
-        }
-    }
-
-    @Command(name = "disableautocompaction", description = "Disable autocompaction for the given keyspace and table")
+    @Command(name = "disableautocompaction", description = "Disable autocompaction for the given keyspace and column family")
     public static class DisableAutoCompaction extends NodeToolCmd
     {
-        @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
+        @Arguments(usage = "[<keyspace> <cfnames>...]", description = "The keyspace followed by one or many column families")
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -1357,10 +1294,10 @@ public class NodeTool
         }
     }
 
-    @Command(name = "enableautocompaction", description = "Enable autocompaction for the given keyspace and table")
+    @Command(name = "enableautocompaction", description = "Enable autocompaction for the given keyspace and column family")
     public static class EnableAutoCompaction extends NodeToolCmd
     {
-        @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
+        @Arguments(usage = "[<keyspace> <cfnames>...]", description = "The keyspace followed by one or many column families")
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -1382,10 +1319,10 @@ public class NodeTool
         }
     }
 
-    @Command(name = "upgradesstables", description = "Rewrite sstables (for the requested tables) that are not on the current version (thus upgrading them to said current version)")
+    @Command(name = "upgradesstables", description = "Rewrite sstables (for the requested column families) that are not on the current version (thus upgrading them to said current version)")
     public static class UpgradeSSTable extends NodeToolCmd
     {
-        @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
+        @Arguments(usage = "[<keyspace> <cfnames>...]", description = "The keyspace followed by one or many column families")
         private List<String> args = new ArrayList<>();
 
         @Option(title = "include_all", name = {"-a", "--include-all-sstables"}, description = "Use -a to include all sstables, even those already on the current version")
@@ -1421,13 +1358,13 @@ public class NodeTool
         @Override
         public void execute(NodeProbe probe)
         {
+            int compactionThroughput = probe.getCompactionThroughput();
             CompactionManagerMBean cm = probe.getCompactionManagerProxy();
             System.out.println("pending tasks: " + probe.getCompactionMetric("PendingTasks"));
             long remainingBytes = 0;
             List<Map<String, String>> compactions = cm.getCompactions();
             if (!compactions.isEmpty())
             {
-                int compactionThroughput = probe.getCompactionThroughput();
                 List<String[]> lines = new ArrayList<>();
                 int[] columnSizes = new int[] { 0, 0, 0, 0, 0, 0, 0 };
 
@@ -1613,10 +1550,10 @@ public class NodeTool
         }
     }
 
-    @Command(name = "getcompactionthreshold", description = "Print min and max compaction thresholds for a given table")
+    @Command(name = "getcompactionthreshold", description = "Print min and max compaction thresholds for a given column family")
     public static class GetCompactionThreshold extends NodeToolCmd
     {
-        @Arguments(usage = "<keyspace> <table>", description = "The keyspace with a table")
+        @Arguments(usage = "<keyspace> <cfname>", description = "The keyspace with a column family")
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -1656,7 +1593,7 @@ public class NodeTool
     @Command(name = "getendpoints", description = "Print the end points that owns the key")
     public static class GetEndpoints extends NodeToolCmd
     {
-        @Arguments(usage = "<keyspace> <table> <key>", description = "The keyspace, the table, and the key for which we need to find the endpoint")
+        @Arguments(usage = "<keyspace> <cfname> <key>", description = "The keyspace, the column family, and the partition key for which we need to find the endpoint")
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -1678,7 +1615,7 @@ public class NodeTool
     @Command(name = "getsstables", description = "Print the sstable filenames that own the key")
     public static class GetSSTables extends NodeToolCmd
     {
-        @Arguments(usage = "<keyspace> <table> <key>", description = "The keyspace, the table, and the key")
+        @Arguments(usage = "<keyspace> <cfname> <key>", description = "The keyspace, the column family, and the key")
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -1803,10 +1740,11 @@ public class NodeTool
         @Override
         public void execute(NodeProbe probe)
         {
+            StorageProxyMBean sp = probe.getSpProxy();
             String[] percentiles = new String[]{"50%", "75%", "95%", "98%", "99%", "Min", "Max"};
-            double[] readLatency = probe.metricPercentilesAsArray(probe.getProxyMetric("Read"));
-            double[] writeLatency = probe.metricPercentilesAsArray(probe.getProxyMetric("Write"));
-            double[] rangeLatency = probe.metricPercentilesAsArray(probe.getProxyMetric("RangeSlice"));
+            double[] readLatency = probe.metricPercentilesAsArray(sp.getRecentReadLatencyHistogramMicros());
+            double[] writeLatency = probe.metricPercentilesAsArray(sp.getRecentWriteLatencyHistogramMicros());
+            double[] rangeLatency = probe.metricPercentilesAsArray(sp.getRecentRangeLatencyHistogramMicros());
 
             System.out.println("proxy histograms");
             System.out.println(format("%-10s%18s%18s%18s",
@@ -1841,7 +1779,7 @@ public class NodeTool
     @Command(name = "refresh", description = "Load newly placed SSTables to the system without restart")
     public static class Refresh extends NodeToolCmd
     {
-        @Arguments(usage = "<keyspace> <table>", description = "The keyspace and table name")
+        @Arguments(usage = "<keyspace> <cfname>", description = "The keyspace and column family name")
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -1849,6 +1787,17 @@ public class NodeTool
         {
             checkArgument(args.size() == 2, "refresh requires ks and cf args");
             probe.loadNewSSTables(args.get(0), args.get(1));
+        }
+    }
+
+    @Deprecated
+    @Command(name = "removetoken", description = "DEPRECATED (see removenode)", hidden = true)
+    public static class RemoveToken extends NodeToolCmd
+    {
+        @Override
+        public void execute(NodeProbe probe)
+        {
+            System.err.println("Warn: removetoken is deprecated, please use removenode instead");
         }
     }
 
@@ -1877,34 +1826,14 @@ public class NodeTool
         }
     }
 
-    @Command(name = "assassinate", description = "Forcefully remove a dead node without re-replicating any data.  Use as a last resort if you cannot removenode")
-    public static class Assassinate extends NodeToolCmd
-    {
-        @Arguments(title = "ip address", usage = "<ip_address>", description = "IP address of the endpoint to assassinate", required = true)
-        private String endpoint = EMPTY;
-
-        @Override
-        public void execute(NodeProbe probe)
-        {
-            try
-            {
-                probe.assassinateEndpoint(endpoint);
-            }
-            catch (UnknownHostException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-    }
-
-    @Command(name = "repair", description = "Repair one or more tables")
+    @Command(name = "repair", description = "Repair one or more column families")
     public static class Repair extends NodeToolCmd
     {
-        @Arguments(usage = "[<keyspace> <tables>...]", description = "The keyspace followed by one or many tables")
+        @Arguments(usage = "[<keyspace> <cfnames>...]", description = "The keyspace followed by one or many column families")
         private List<String> args = new ArrayList<>();
 
-        @Option(title = "seqential", name = {"-seq", "--sequential"}, description = "Use -seq to carry out a sequential repair")
-        private boolean sequential = false;
+        @Option(title = "parallel", name = {"-par", "--parallel"}, description = "Use -par to carry out a parallel repair")
+        private boolean parallel = false;
 
         @Option(title = "dc parallel", name = {"-dcpar", "--dc-parallel"}, description = "Use -dcpar to repair data centers in parallel.")
         private boolean dcParallel = false;
@@ -1927,16 +1856,8 @@ public class NodeTool
         @Option(title = "primary_range", name = {"-pr", "--partitioner-range"}, description = "Use -pr to repair only the first range returned by the partitioner")
         private boolean primaryRange = false;
 
-        @Option(title = "full", name = {"-full", "--full"}, description = "Use -full to issue a full repair.")
-        private boolean fullRepair = false;
-
-        @Option(title = "job_threads", name = {"-j", "--job-threads"}, description = "Number of threads to run repair jobs. " +
-                                                                                     "Usually this means number of CFs to repair concurrently. " +
-                                                                                     "WARNING: increasing this puts more load on repairing nodes, so be careful. (default: 1, max: 4)")
-        private int numJobThreads = 1;
-
-        @Option(title = "trace_repair", name = {"-tr", "--trace"}, description = "Use -tr to trace the repair. Traces are logged to system_traces.events.")
-        private boolean trace = false;
+        @Option(title = "incremental_repair", name = {"-inc", "--incremental"}, description = "Use -inc to use the new incremental repair")
+        private boolean incrementalRepair = false;
 
         @Override
         public void execute(NodeProbe probe)
@@ -1949,34 +1870,26 @@ public class NodeTool
 
             for (String keyspace : keyspaces)
             {
-                Map<String, String> options = new HashMap<>();
-                RepairParallelism parallelismDegree = RepairParallelism.PARALLEL;
-                if (sequential)
-                    parallelismDegree = RepairParallelism.SEQUENTIAL;
-                else if (dcParallel)
-                    parallelismDegree = RepairParallelism.DATACENTER_AWARE;
-                options.put(RepairOption.PARALLELISM_KEY, parallelismDegree.getName());
-                options.put(RepairOption.PRIMARY_RANGE_KEY, Boolean.toString(primaryRange));
-                options.put(RepairOption.INCREMENTAL_KEY, Boolean.toString(!fullRepair));
-                options.put(RepairOption.JOB_THREADS_KEY, Integer.toString(numJobThreads));
-                options.put(RepairOption.TRACE_KEY, Boolean.toString(trace));
-                options.put(RepairOption.COLUMNFAMILIES_KEY, StringUtils.join(cfnames, ","));
-                if (!startToken.isEmpty() || !endToken.isEmpty())
-                {
-                    options.put(RepairOption.RANGES_KEY, startToken + ":" + endToken);
-                }
-                if (localDC)
-                {
-                    options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(newArrayList(probe.getDataCenter()), ","));
-                }
-                else
-                {
-                    options.put(RepairOption.DATACENTERS_KEY, StringUtils.join(specificDataCenters, ","));
-                }
-                options.put(RepairOption.HOSTS_KEY, StringUtils.join(specificHosts, ","));
                 try
                 {
-                    probe.repairAsync(System.out, keyspace, options);
+                    RepairParallelism parallelismDegree = RepairParallelism.SEQUENTIAL;
+                    if (parallel)
+                        parallelismDegree = RepairParallelism.PARALLEL;
+                    else if (dcParallel)
+                        parallelismDegree = RepairParallelism.DATACENTER_AWARE;
+
+                    Collection<String> dataCenters = null;
+                    Collection<String> hosts = null;
+                    if (!specificDataCenters.isEmpty())
+                        dataCenters = newArrayList(specificDataCenters);
+                    else if (localDC)
+                        dataCenters = newArrayList(probe.getDataCenter());
+                    else if(!specificHosts.isEmpty())
+                        hosts = newArrayList(specificHosts);
+                    if (!startToken.isEmpty() || !endToken.isEmpty())
+                        probe.forceRepairRangeAsync(System.out, keyspace, parallelismDegree, dataCenters,hosts, startToken, endToken, !incrementalRepair);
+                    else
+                        probe.forceRepairAsync(System.out, keyspace, parallelismDegree, dataCenters, hosts, primaryRange, !incrementalRepair, cfnames);
                 } catch (Exception e)
                 {
                     throw new RuntimeException("Error occurred during repair", e);
@@ -2002,10 +1915,10 @@ public class NodeTool
         }
     }
 
-    @Command(name = "setcompactionthreshold", description = "Set min and max compaction thresholds for a given table")
+    @Command(name = "setcompactionthreshold", description = "Set min and max compaction thresholds for a given column family")
     public static class SetCompactionThreshold extends NodeToolCmd
     {
-        @Arguments(title = "<keyspace> <table> <minthreshold> <maxthreshold>", usage = "<keyspace> <table> <minthreshold> <maxthreshold>", description = "The keyspace, the table, min and max threshold", required = true)
+        @Arguments(title = "<keyspace> <cfname> <minthreshold> <maxthreshold>", usage = "<keyspace> <cfname> <minthreshold> <maxthreshold>", description = "The keyspace, the column family, min and max threshold", required = true)
         private List<String> args = new ArrayList<>();
 
         @Override
@@ -2076,17 +1989,20 @@ public class NodeTool
         }
     }
 
-    @Command(name = "snapshot", description = "Take a snapshot of specified keyspaces or a snapshot of the specified table")
+    @Command(name = "snapshot", description = "Take a snapshot of specified keyspaces or a snapshot of the specified column family")
     public static class Snapshot extends NodeToolCmd
     {
         @Arguments(usage = "[<keyspaces...>]", description = "List of keyspaces. By default, all keyspaces")
         private List<String> keyspaces = new ArrayList<>();
 
-        @Option(title = "table", name = {"-cf", "--column-family", "--table"}, description = "The table name (you must specify one and only one keyspace for using this option)")
+        @Option(title = "cfname", name = {"-cf", "--column-family"}, description = "The column family name (you must specify one and only one keyspace for using this option)")
         private String columnFamily = null;
 
         @Option(title = "tag", name = {"-t", "--tag"}, description = "The name of the snapshot")
         private String snapshotName = Long.toString(System.currentTimeMillis());
+
+        @Option(title = "kclist", name = { "-kc", "--kc-list" }, description = "The list of Keyspace.Column family to take snapshot.(you must not specify only keyspace)")
+        private String kcList = null;
 
         @Override
         public void execute(NodeProbe probe)
@@ -2097,19 +2013,40 @@ public class NodeTool
 
                 sb.append("Requested creating snapshot(s) for ");
 
-                if (keyspaces.isEmpty())
-                    sb.append("[all keyspaces]");
+                // Create a separate path for kclist to avoid breaking of already existing scripts
+                if (null != kcList && !kcList.isEmpty())
+                {
+                    kcList = kcList.replace(" ", "");
+                    if (keyspaces.isEmpty() && null == columnFamily)
+                        sb.append("[").append(kcList).append("]");
+                    else
+                    {
+                        throw new IOException(
+                                "When specifying the Keyspace columfamily list for a snapshot, you should not specify columnfamily");
+                    }
+                    if (!snapshotName.isEmpty())
+                        sb.append(" with snapshot name [").append(snapshotName).append("]");
+                    System.out.println(sb.toString());
+                    probe.takeMultipleColumnFamilySnapshot(snapshotName, kcList.split(","));
+                    System.out.println("Snapshot directory: " + snapshotName);
+                }
                 else
-                    sb.append("[").append(join(keyspaces, ", ")).append("]");
+                {
+                    if (keyspaces.isEmpty())
+                        sb.append("[all keyspaces]");
+                    else
+                        sb.append("[").append(join(keyspaces, ", ")).append("]");
 
-                if (!snapshotName.isEmpty())
-                    sb.append(" with snapshot name [").append(snapshotName).append("]");
+                    if (!snapshotName.isEmpty())
+                        sb.append(" with snapshot name [").append(snapshotName).append("]");
 
-                System.out.println(sb.toString());
+                    System.out.println(sb.toString());
 
-                probe.takeSnapshot(snapshotName, columnFamily, toArray(keyspaces, String.class));
-                System.out.println("Snapshot directory: " + snapshotName);
-            } catch (IOException e)
+                    probe.takeSnapshot(snapshotName, columnFamily, toArray(keyspaces, String.class));
+                    System.out.println("Snapshot directory: " + snapshotName);
+                }
+            }
+            catch (IOException e)
             {
                 throw new RuntimeException("Error during taking a snapshot", e);
             }
@@ -2167,11 +2104,12 @@ public class NodeTool
         @Option(title = "resolve_ip", name = {"-r", "--resolve-ip"}, description = "Show node domain names instead of IPs")
         private boolean resolveIp = false;
 
+        private boolean hasEffectiveOwns = false;
         private boolean isTokenPerNode = true;
         private int maxAddressLength = 0;
         private String format = null;
         private Collection<String> joiningNodes, leavingNodes, movingNodes, liveNodes, unreachableNodes;
-        private Map<String, String> loadMap, hostIDMap;
+        private Map<String, String> loadMap, hostIDMap, tokensToEndpoints;
         private EndpointSnitchInfoMBean epSnitchInfo;
 
         @Override
@@ -2181,22 +2119,20 @@ public class NodeTool
             leavingNodes = probe.getLeavingNodes();
             movingNodes = probe.getMovingNodes();
             loadMap = probe.getLoadMap();
-            Map<String, String> tokensToEndpoints = probe.getTokenToEndpointMap();
+            tokensToEndpoints = probe.getTokenToEndpointMap();
             liveNodes = probe.getLiveNodes();
             unreachableNodes = probe.getUnreachableNodes();
             hostIDMap = probe.getHostIdMap();
             epSnitchInfo = probe.getEndpointSnitchInfoProxy();
-
+            
             StringBuffer errors = new StringBuffer();
 
             Map<InetAddress, Float> ownerships = null;
-            boolean hasEffectiveOwns = false;
             try
             {
                 ownerships = probe.effectiveOwnership(keyspace);
                 hasEffectiveOwns = true;
-            }
-            catch (IllegalStateException e)
+            } catch (IllegalStateException e)
             {
                 ownerships = probe.getOwnership();
                 errors.append("Note: " + e.getMessage() + "%n");
@@ -2240,9 +2176,9 @@ public class NodeTool
                     printNode(endpoint.getHostAddress(), owns, tokens, hasEffectiveOwns, isTokenPerNode);
                 }
             }
-
+            
             System.out.printf("%n" + errors.toString());
-
+            
         }
 
         private void findMaxAddressLength(Map<String, SetHostStat> dcs)
@@ -2311,7 +2247,7 @@ public class NodeTool
                 buf.append(addressPlaceholder);               // address
                 buf.append("%-9s  ");                         // load
                 if (!isTokenPerNode)
-                    buf.append("%-11s  ");                     // "Tokens"
+                    buf.append("%-6s  ");                     // "Tokens"
                 if (hasEffectiveOwns)
                     buf.append("%-16s  ");                    // "Owns (effective)"
                 else
@@ -2328,7 +2264,7 @@ public class NodeTool
         }
     }
 
-    private static Map<String, SetHostStat> getOwnershipByDc(NodeProbe probe, boolean resolveIp,
+    private static Map<String, SetHostStat> getOwnershipByDc(NodeProbe probe, boolean resolveIp, 
                                                              Map<String, String> tokenToEndpoint,
                                                              Map<InetAddress, Float> ownerships)
     {
@@ -2469,7 +2405,7 @@ public class NodeTool
     @Command(name = "stop", description = "Stop compaction")
     public static class Stop extends NodeToolCmd
     {
-        @Arguments(title = "compaction_type", usage = "<compaction type>", description = "Supported types are COMPACTION, VALIDATION, CLEANUP, SCRUB, VERIFY, INDEX_BUILD", required = true)
+        @Arguments(title = "compaction_type", usage = "<compaction type>", description = "Supported types are COMPACTION, VALIDATION, CLEANUP, SCRUB, INDEX_BUILD", required = true)
         private OperationType compactionType = OperationType.UNKNOWN;
 
         @Override
@@ -2546,10 +2482,10 @@ public class NodeTool
         }
     }
 
-    @Command(name = "rebuild_index", description = "A full rebuild of native secondary indexes for a given table")
+    @Command(name = "rebuild_index", description = "A full rebuild of native secondary indexes for a given column family")
     public static class RebuildIndex extends NodeToolCmd
     {
-        @Arguments(usage = "<keyspace> <table> <indexName...>", description = "The keyspace and table name followed by a list of index names (IndexNameExample: Standard3.IdxName Standard3.IdxName1)")
+        @Arguments(usage = "<keyspace> <cfname> <indexName...>", description = "The keyspace and column family name followed by a list of index names (IndexNameExample: Standard3.IdxName Standard3.IdxName1)")
         List<String> args = new ArrayList<>();
 
         @Override
@@ -2643,7 +2579,7 @@ public class NodeTool
         }
     }
 
-    @Command(name = "drain", description = "Drain the node (stop accepting writes and flush all tables)")
+    @Command(name = "drain", description = "Drain the node (stop accepting writes and flush all column families)")
     public static class Drain extends NodeToolCmd
     {
         @Override
@@ -2654,7 +2590,7 @@ public class NodeTool
                 probe.drain();
             } catch (IOException | InterruptedException | ExecutionException e)
             {
-                throw new RuntimeException("Error occurred during flushing", e);
+                throw new RuntimeException("Error occured during flushing", e);
             }
         }
     }
@@ -2667,15 +2603,19 @@ public class NodeTool
         {
             System.out.printf("%-25s%10s%10s%15s%10s%18s%n", "Pool Name", "Active", "Pending", "Completed", "Blocked", "All time blocked");
 
-            for (Stage stage : Stage.jmxEnabledStages())
+            Iterator<Map.Entry<String, JMXEnabledThreadPoolExecutorMBean>> threads = probe.getThreadPoolMBeanProxies();
+            while (threads.hasNext())
             {
+                Map.Entry<String, JMXEnabledThreadPoolExecutorMBean> thread = threads.next();
+                String poolName = thread.getKey();
+                JMXEnabledThreadPoolExecutorMBean threadPoolProxy = thread.getValue();
                 System.out.printf("%-25s%10s%10s%15s%10s%18s%n",
-                                  stage.getJmxName(),
-                                  probe.getThreadPoolMetric(stage, "ActiveTasks"),
-                                  probe.getThreadPoolMetric(stage, "PendingTasks"),
-                                  probe.getThreadPoolMetric(stage, "CompletedTasks"),
-                                  probe.getThreadPoolMetric(stage, "CurrentlyBlockedTasks"),
-                                  probe.getThreadPoolMetric(stage, "TotalBlockedTasks"));
+                        poolName,
+                        threadPoolProxy.getActiveCount(),
+                        threadPoolProxy.getPendingTasks(),
+                        threadPoolProxy.getCompletedTasks(),
+                        threadPoolProxy.getCurrentlyBlockedTasks(),
+                        threadPoolProxy.getTotalBlockedTasks());
             }
 
             System.out.printf("%n%-20s%10s%n", "Message type", "Dropped");
@@ -2693,8 +2633,8 @@ public class NodeTool
             double[] stats = probe.getAndResetGCStats();
             double mean = stats[2] / stats[5];
             double stdev = Math.sqrt((stats[3] / stats[5]) - (mean * mean));
-            System.out.printf("%20s%20s%20s%20s%20s%20s%25s%n", "Interval (ms)", "Max GC Elapsed (ms)", "Total GC Elapsed (ms)", "Stdev GC Elapsed (ms)", "GC Reclaimed (MB)", "Collections", "Direct Memory Bytes");
-            System.out.printf("%20.0f%20.0f%20.0f%20.0f%20.0f%20.0f%25d%n", stats[0], stats[1], stats[2], stdev, stats[4], stats[5], (long)stats[6]);
+            System.out.printf("%20s%20s%20s%20s%20s%20s%n", "Interval (ms)", "Max GC Elapsed (ms)", "Total GC Elapsed (ms)", "Stdev GC Elapsed (ms)", "GC Reclaimed (MB)", "Collections");
+            System.out.printf("%20.0f%20.0f%20.0f%20.0f%20.0f%20.0f%n", stats[0], stats[1], stats[2], stdev, stats[4], stats[5]);
         }
     }
 
@@ -2713,7 +2653,7 @@ public class NodeTool
                 probe.truncateHints(endpoint);
         }
     }
-
+    
     @Command(name = "setlogginglevel", description = "Set the log level threshold for a given class. If both class and level are empty/null, it will reset to the initial configuration")
     public static class SetLoggingLevel extends NodeToolCmd
     {
@@ -2728,7 +2668,7 @@ public class NodeTool
             probe.setLoggingLevel(classQualifier, level);
         }
     }
-
+    
     @Command(name = "getlogginglevels", description = "Get the runtime logging levels")
     public static class GetLoggingLevels extends NodeToolCmd
     {
@@ -2742,20 +2682,4 @@ public class NodeTool
         }
     }
 
-    @Command(name = "resume", description = "Resume bootstrap streaming")
-    public static class BootstrapResume extends NodeToolCmd
-    {
-        @Override
-        protected void execute(NodeProbe probe)
-        {
-            try
-            {
-                probe.resumeBootstrap(System.out);
-            }
-            catch (IOException e)
-            {
-                throw new IOError(e);
-            }
-        }
-    }
 }

@@ -26,7 +26,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.zip.Adler32;
-import java.util.zip.CheckedInputStream;
 import java.util.zip.Checksum;
 
 import com.google.common.base.Charsets;
@@ -34,8 +33,7 @@ import com.google.common.base.Charsets;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.utils.CRC32Factory;
-import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.PureJavaCrc32;
 
 public class DataIntegrityMetadata
 {
@@ -54,7 +52,7 @@ public class DataIntegrityMetadata
         public ChecksumValidator(Descriptor descriptor) throws IOException
         {
             this.descriptor = descriptor;
-            checksum = descriptor.version.hasAllAdlerChecksums() ? new Adler32() : CRC32Factory.instance.create();
+            checksum = descriptor.version.hasAllAdlerChecksums ? new Adler32() : new PureJavaCrc32();
             reader = RandomAccessReader.open(new File(descriptor.filenameFor(Component.CRC)));
             chunkSize = reader.readInt();
         }
@@ -87,63 +85,11 @@ public class DataIntegrityMetadata
         }
     }
 
-    public static FileDigestValidator fileDigestValidator(Descriptor desc) throws IOException
-    {
-        return new FileDigestValidator(desc);
-    }
-
-    public static class FileDigestValidator implements Closeable
-    {
-        private final Checksum checksum;
-        private final RandomAccessReader digestReader;
-        private final RandomAccessReader dataReader;
-        private final Descriptor descriptor;
-        private long storedDigestValue;
-        private long calculatedDigestValue;
-
-        public FileDigestValidator(Descriptor descriptor) throws IOException
-        {
-            this.descriptor = descriptor;
-            checksum = descriptor.version.hasAllAdlerChecksums() ? new Adler32() : CRC32Factory.instance.create();
-            digestReader = RandomAccessReader.open(new File(descriptor.filenameFor(Component.DIGEST)));
-            dataReader = RandomAccessReader.open(new File(descriptor.filenameFor(Component.DATA)));
-            try
-            {
-                storedDigestValue = Long.parseLong(digestReader.readLine());
-            }
-            catch (Exception e)
-            {
-                // Attempting to create a FileDigestValidator without a DIGEST file will fail
-                throw new IOException("Corrupted SSTable : " + descriptor.filenameFor(Component.DATA));
-            }
-
-        }
-
-        // Validate the entire file
-        public void validate() throws IOException
-        {
-            CheckedInputStream checkedInputStream = new CheckedInputStream(dataReader, checksum);
-            byte[] chunk = new byte[64 * 1024];
-
-            while( checkedInputStream.read(chunk) > 0 ) { }
-            calculatedDigestValue = checkedInputStream.getChecksum().getValue();
-            if (storedDigestValue != calculatedDigestValue) {
-                throw new IOException("Corrupted SSTable : " + descriptor.filenameFor(Component.DATA));
-            }
-        }
-
-        public void close()
-        {
-            this.digestReader.close();
-        }
-    }
-
-
     public static class ChecksumWriter
     {
-        private final Adler32 incrementalChecksum = new Adler32();
+        private final Checksum incrementalChecksum = new Adler32();
         private final DataOutput incrementalOut;
-        private final Adler32 fullChecksum = new Adler32();
+        private final Checksum fullChecksum = new Adler32();
 
         public ChecksumWriter(DataOutput incrementalOut)
         {
@@ -169,28 +115,25 @@ public class DataIntegrityMetadata
 
         // CompressedSequentialWriters serialize the partial checksums inline with the compressed data chunks they
         // corroborate, whereas ChecksummedSequentialWriters serialize them to a different file.
-        public void appendDirect(ByteBuffer bb, boolean checksumIncrementalResult)
+        public void append(byte[] buffer, int start, int end, boolean checksumIncrementalResult)
         {
             try
             {
+                int incrementalChecksumValue;
 
-                ByteBuffer toAppend = bb.duplicate();
-                toAppend.mark();
-                FBUtilities.directCheckSum(incrementalChecksum, toAppend);
-                toAppend.reset();
-
-                int incrementalChecksumValue = (int) incrementalChecksum.getValue();
+                incrementalChecksum.update(buffer, start, end);
+                incrementalChecksumValue = (int) incrementalChecksum.getValue();
                 incrementalOut.writeInt(incrementalChecksumValue);
+                incrementalChecksum.reset();
 
-                FBUtilities.directCheckSum(fullChecksum, toAppend);
+                fullChecksum.update(buffer, start, end);
+
                 if (checksumIncrementalResult)
                 {
                     ByteBuffer byteBuffer = ByteBuffer.allocate(4);
                     byteBuffer.putInt(incrementalChecksumValue);
                     fullChecksum.update(byteBuffer.array(), 0, byteBuffer.array().length);
                 }
-                incrementalChecksum.reset();
-
             }
             catch (IOException e)
             {

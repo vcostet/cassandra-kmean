@@ -28,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.google.common.base.Throwables;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -37,7 +39,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.LeveledManifest;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -84,7 +86,7 @@ public class SSTableOfflineRelevel
         boolean dryRun = args[0].equals("--dry-run");
         String keyspace = args[args.length - 2];
         String columnfamily = args[args.length - 1];
-        Schema.instance.loadFromDisk(false);
+        DatabaseDescriptor.loadSchemas(false);
 
         if (Schema.instance.getCFMetaData(keyspace, columnfamily) == null)
             throw new IllegalArgumentException(String.format("Unknown keyspace/columnFamily %s.%s",
@@ -99,8 +101,16 @@ public class SSTableOfflineRelevel
         {
             if (sstable.getKey() != null)
             {
-                SSTableReader reader = SSTableReader.open(sstable.getKey());
-                sstables.add(reader);
+                try
+                {
+                    SSTableReader reader = SSTableReader.open(sstable.getKey());
+                    sstables.add(reader);
+                }
+                catch (Throwable t)
+                {
+                    out.println("Couldn't open sstable: "+sstable.getKey().filenameFor(Component.DATA));
+                    Throwables.propagate(t);
+                }
             }
         }
         if (sstables.isEmpty())

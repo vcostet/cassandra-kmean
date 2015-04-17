@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.notifications;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.SSTableReader;
 
 /**
  * Fired right before removing an SSTable.

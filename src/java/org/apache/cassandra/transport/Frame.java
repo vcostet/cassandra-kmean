@@ -111,8 +111,7 @@ public class Frame
         {
             // The order of that enum matters!!
             COMPRESSED,
-            TRACING,
-            CUSTOM_PAYLOAD;
+            TRACING;
 
             private static final Flag[] ALL_VALUES = values();
 
@@ -182,8 +181,7 @@ public class Frame
             int version = firstByte & 0x7F;
 
             if (version > Server.CURRENT_VERSION)
-                throw new ProtocolException(String.format("Invalid or unsupported protocol version (%d); highest supported is %d ",
-                                                          version, Server.CURRENT_VERSION));
+                throw new ProtocolException("Invalid or unsupported protocol version: " + version);
 
             // Wait until we have the complete V3+ header
             if (version >= Server.VERSION_3 && buffer.readableBytes() < Header.MODERN_LENGTH)

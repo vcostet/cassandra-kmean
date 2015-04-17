@@ -25,10 +25,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
-import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
-import org.apache.cassandra.db.compaction.writers.SplittingSizeTieredCompactionWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import com.google.common.primitives.Longs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +33,7 @@ import org.apache.cassandra.cql3.statements.CFPropDefs;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.ColumnNameHelper;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.utils.Pair;
 
 public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
@@ -163,7 +160,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
 
     private static Map<SSTableReader, Double> getHotnessMap(Collection<SSTableReader> sstables)
     {
-        Map<SSTableReader, Double> hotness = new HashMap<>(sstables.size());
+        Map<SSTableReader, Double> hotness = new HashMap<>();
         for (SSTableReader sstable : sstables)
             hotness.put(sstable, hotness(sstable));
         return hotness;
@@ -195,15 +192,13 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
-    public Collection<AbstractCompactionTask> getMaximalTask(final int gcBefore, boolean splitOutput)
+    public Collection<AbstractCompactionTask> getMaximalTask(final int gcBefore)
     {
         Iterable<SSTableReader> filteredSSTables = filterSuspectSSTables(sstables);
         if (Iterables.isEmpty(filteredSSTables))
             return null;
         if (!cfs.getDataTracker().markCompacting(ImmutableList.copyOf(filteredSSTables)))
             return null;
-        if (splitOutput)
-            return Arrays.<AbstractCompactionTask>asList(new SplittingCompactionTask(cfs, filteredSSTables, gcBefore, false));
         return Arrays.<AbstractCompactionTask>asList(new CompactionTask(cfs, filteredSSTables, gcBefore, false));
     }
 
@@ -227,7 +222,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
 
     public static List<Pair<SSTableReader, Long>> createSSTableAndLengthPairs(Iterable<SSTableReader> sstables)
     {
-        List<Pair<SSTableReader, Long>> sstableLengthPairs = new ArrayList<>(Iterables.size(sstables));
+        List<Pair<SSTableReader, Long>> sstableLengthPairs = new ArrayList<Pair<SSTableReader, Long>>(Iterables.size(sstables));
         for(SSTableReader sstable : sstables)
             sstableLengthPairs.add(Pair.create(sstable, sstable.onDiskLength()));
         return sstableLengthPairs;
@@ -334,19 +329,5 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         return String.format("SizeTieredCompactionStrategy[%s/%s]",
             cfs.getMinimumCompactionThreshold(),
             cfs.getMaximumCompactionThreshold());
-    }
-
-    private class SplittingCompactionTask extends CompactionTask
-    {
-        public SplittingCompactionTask(ColumnFamilyStore cfs, Iterable<SSTableReader> sstables, int gcBefore, boolean offline)
-        {
-            super(cfs, sstables, gcBefore, offline);
-        }
-
-        @Override
-        public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs, Set<SSTableReader> allSSTables, Set<SSTableReader> nonExpiredSSTables)
-        {
-            return new SplittingSizeTieredCompactionWriter(cfs, allSSTables, nonExpiredSSTables, compactionType);
-        }
     }
 }

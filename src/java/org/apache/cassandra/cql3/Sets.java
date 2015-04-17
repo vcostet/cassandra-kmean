@@ -32,7 +32,6 @@ import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
-import org.apache.cassandra.serializers.SetSerializer;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -101,28 +100,22 @@ public abstract class Sets
             ColumnSpecification valueSpec = Sets.valueSpecOf(receiver);
             for (Term.Raw rt : elements)
             {
-                if (!rt.testAssignment(keyspace, valueSpec).isAssignable())
+                if (!rt.isAssignableTo(keyspace, valueSpec))
                     throw new InvalidRequestException(String.format("Invalid set literal for %s: value %s is not of type %s", receiver.name, rt, valueSpec.type.asCQL3Type()));
             }
         }
 
-        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
-            if (!(receiver.type instanceof SetType))
+            try
             {
-                // We've parsed empty maps as a set literal to break the ambiguity so handle that case now
-                if (receiver.type instanceof MapType && elements.isEmpty())
-                    return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-
-                return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+                validateAssignableTo(keyspace, receiver);
+                return true;
             }
-
-            // If there is no elements, we can't say it's an exact match (an empty set if fundamentally polymorphic).
-            if (elements.isEmpty())
-                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-
-            ColumnSpecification valueSpec = Sets.valueSpecOf(receiver);
-            return AssignmentTestable.TestResult.testAll(keyspace, valueSpec, elements);
+            catch (InvalidRequestException e)
+            {
+                return false;
+            }
         }
 
         @Override
@@ -132,7 +125,7 @@ public abstract class Sets
         }
     }
 
-    public static class Value extends Term.Terminal
+    public static class Value extends Term.Terminal implements Term.CollectionTerminal
     {
         public final SortedSet<ByteBuffer> elements;
 
@@ -159,9 +152,14 @@ public abstract class Sets
             }
         }
 
-        public ByteBuffer get(int protocolVersion)
+        public ByteBuffer get(QueryOptions options)
         {
-            return CollectionSerializer.pack(elements, elements.size(), protocolVersion);
+            return getWithProtocolVersion(options.getProtocolVersion());
+        }
+
+        public ByteBuffer getWithProtocolVersion(int protocolVersion)
+        {
+            return CollectionSerializer.pack(new ArrayList<>(elements), elements.size(), protocolVersion);
         }
 
         public boolean equals(SetType st, Value v)
@@ -275,12 +273,14 @@ public abstract class Sets
         static void doAdd(Term t, ColumnFamily cf, Composite prefix, ColumnDefinition column, UpdateParameters params) throws InvalidRequestException
         {
             Term.Terminal value = t.bind(params.options);
+            Sets.Value setValue = (Sets.Value)value;
             if (column.type.isMultiCell())
             {
                 if (value == null)
                     return;
 
-                for (ByteBuffer bb : ((Value) value).elements)
+                Set<ByteBuffer> toAdd = setValue.elements;
+                for (ByteBuffer bb : toAdd)
                 {
                     CellName cellName = cf.getComparator().create(prefix, column, bb);
                     cf.addColumn(params.makeColumn(cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER));
@@ -293,7 +293,7 @@ public abstract class Sets
                 if (value == null)
                     cf.addAtom(params.makeTombstone(cellName));
                 else
-                    cf.addColumn(params.makeColumn(cellName, value.get(Server.CURRENT_VERSION)));
+                    cf.addColumn(params.makeColumn(cellName, ((Value) value).getWithProtocolVersion(Server.CURRENT_VERSION)));
             }
         }
     }
@@ -317,10 +317,12 @@ public abstract class Sets
             // This can be either a set or a single element
             Set<ByteBuffer> toDiscard = value instanceof Sets.Value
                                       ? ((Sets.Value)value).elements
-                                      : Collections.singleton(value.get(params.options.getProtocolVersion()));
+                                      : Collections.singleton(value.get(params.options));
 
             for (ByteBuffer bb : toDiscard)
+            {
                 cf.addColumn(params.makeTombstone(cf.getComparator().create(prefix, column, bb)));
+            }
         }
     }
 
@@ -338,7 +340,7 @@ public abstract class Sets
             if (elt == null)
                 throw new InvalidRequestException("Invalid null set element");
 
-            CellName cellName = cf.getComparator().create(prefix, column, elt.get(params.options.getProtocolVersion()));
+            CellName cellName = cf.getComparator().create(prefix, column, elt.get(params.options));
             cf.addColumn(params.makeTombstone(cellName));
         }
     }

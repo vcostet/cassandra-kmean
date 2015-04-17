@@ -22,11 +22,12 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+
+import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -120,13 +121,14 @@ public class TypeParser
 
     public Map<String, String> getKeyValueParameters() throws SyntaxException
     {
+        Map<String, String> map = new HashMap<String, String>();
+
         if (isEOS())
-            return Collections.emptyMap();
+            return map;
 
         if (str.charAt(idx) != '(')
             throw new IllegalStateException();
 
-        Map<String, String> map = new HashMap<String, String>();
         ++idx; // skipping '('
 
         while (skipBlankAndComma())
@@ -269,7 +271,7 @@ public class TypeParser
             {
                 AbstractType<?> type = parse();
                 if (!(type instanceof CollectionType))
-                    throw new SyntaxException(type + " is not a collection type");
+                    throw new SyntaxException(type.toString() + " is not a collection type");
                 map.put(bb, (CollectionType)type);
             }
             catch (SyntaxException e)
@@ -582,6 +584,7 @@ public class TypeParser
         {
             sb.append(',');
             sb.append(ByteBufferUtil.bytesToHex(columnNames.get(i))).append(":");
+
             // omit FrozenType(...) from fields because it is currently implicit
             sb.append(columnTypes.get(i).toString(true));
         }

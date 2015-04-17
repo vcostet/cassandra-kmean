@@ -45,13 +45,11 @@ public class StreamCoordinator
     private Map<InetAddress, HostStreamingData> peerSessions = new HashMap<>();
     private final int connectionsPerHost;
     private StreamConnectionFactory factory;
-    private final boolean keepSSTableLevel;
 
-    public StreamCoordinator(int connectionsPerHost, boolean keepSSTableLevel, StreamConnectionFactory factory)
+    public StreamCoordinator(int connectionsPerHost, StreamConnectionFactory factory)
     {
         this.connectionsPerHost = connectionsPerHost;
         this.factory = factory;
-        this.keepSSTableLevel = keepSSTableLevel;
     }
 
     public void setConnectionFactory(StreamConnectionFactory factory)
@@ -181,7 +179,7 @@ public class StreamCoordinator
     {
         HostStreamingData data = peerSessions.get(peer);
         if (data == null)
-            throw new IllegalArgumentException("Unknown peer requested: " + peer);
+            throw new IllegalArgumentException("Unknown peer requested: " + peer.toString());
         return data;
     }
 
@@ -235,7 +233,7 @@ public class StreamCoordinator
             // create
             if (streamSessions.size() < connectionsPerHost)
             {
-                StreamSession session = new StreamSession(peer, connecting, factory, streamSessions.size(), keepSSTableLevel);
+                StreamSession session = new StreamSession(peer, connecting, factory, streamSessions.size());
                 streamSessions.put(++lastReturned, session);
                 return session;
             }
@@ -267,7 +265,7 @@ public class StreamCoordinator
             StreamSession session = streamSessions.get(id);
             if (session == null)
             {
-                session = new StreamSession(peer, connecting, factory, id, keepSSTableLevel);
+                session = new StreamSession(peer, connecting, factory, id);
                 streamSessions.put(id, session);
             }
             return session;

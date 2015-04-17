@@ -119,9 +119,9 @@ public class Hex
      * @return Constructor if successful, null if the constructor cannot be
      * accessed
      */
-    public static <T> Constructor<T> getProtectedConstructor(Class<T> klass, Class<?>... paramTypes)
+    public static Constructor getProtectedConstructor(Class klass, Class... paramTypes)
     {
-        Constructor<T> c;
+        Constructor c;
         try
         {
             c = klass.getDeclaredConstructor(paramTypes);

@@ -24,6 +24,7 @@ import java.util.Comparator;
 
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.RangeTombstone;
+import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.filter.ColumnSlice;
 import org.apache.cassandra.db.filter.SliceQueryFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -98,19 +99,19 @@ public interface CType extends Comparator<Composite>
     /**
      * Deserialize a Composite from a ByteBuffer.
      *
-     * This is meant for thrift to convert the fully serialized buffer we
+     * This is meant for thrift/cql2 to convert the fully serialized buffer we
      * get from the clients to composites.
      */
     public Composite fromByteBuffer(ByteBuffer bb);
 
     /**
-     * Returns a AbstractType corresponding to this CType for thrift sake.
+     * Returns a AbstractType corresponding to this CType for thrift/cql2 sake.
      *
      * If the CType is a "simple" one, this just return the wrapped type, otherwise
      * it returns the corresponding org.apache.cassandra.db.marshal.CompositeType.
      *
      * This is only meant to be use for backward compatibility (particularly for
-     * thrift) but it's not meant to be used internally.
+     * thrift/cql2) but it's not meant to be used internally.
      */
     public AbstractType<?> asAbstractType();
 
@@ -129,10 +130,12 @@ public interface CType extends Comparator<Composite>
 
     public Serializer serializer();
 
+    public ISerializer<IndexInfo> indexSerializer();
     public IVersionedSerializer<ColumnSlice> sliceSerializer();
     public IVersionedSerializer<SliceQueryFilter> sliceQueryFilterSerializer();
     public DeletionInfo.Serializer deletionInfoSerializer();
     public RangeTombstone.Serializer rangeTombstoneSerializer();
+    public RowIndexEntry.Serializer rowIndexEntrySerializer();
 
     public interface Serializer extends ISerializer<Composite>
     {

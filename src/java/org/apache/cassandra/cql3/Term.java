@@ -67,8 +67,6 @@ public interface Term
      */
     public abstract boolean containsBindMarker();
 
-    boolean usesFunction(String ksName, String functionName);
-
     /**
      * A parsed, non prepared (thus untyped) term.
      *
@@ -78,7 +76,7 @@ public interface Term
      *   - a function call
      *   - a marker
      */
-    public interface Raw extends AssignmentTestable
+    public interface Raw extends AssignementTestable
     {
         /**
          * This method validates this RawTerm is valid for provided column
@@ -117,11 +115,6 @@ public interface Term
         public void collectMarkerSpecification(VariableSpecifications boundNames) {}
         public Terminal bind(QueryOptions options) { return this; }
 
-        public boolean usesFunction(String ksName, String functionName)
-        {
-            return false;
-        }
-
         // While some NonTerminal may not have bind markers, no Term can be Terminal
         // with a bind marker
         public boolean containsBindMarker()
@@ -131,19 +124,24 @@ public interface Term
 
         /**
          * @return the serialized value of this terminal.
-         * @param protocolVersion
          */
-        public abstract ByteBuffer get(int protocolVersion) throws InvalidRequestException;
+        public abstract ByteBuffer get(QueryOptions options);
 
         public ByteBuffer bindAndGet(QueryOptions options) throws InvalidRequestException
         {
-            return get(options.getProtocolVersion());
+            return get(options);
         }
     }
 
     public abstract class MultiItemTerminal extends Terminal
     {
         public abstract List<ByteBuffer> getElements();
+    }
+
+    public interface CollectionTerminal
+    {
+        /** Gets the value of the collection when serialized with the given protocol version format */
+        public ByteBuffer getWithProtocolVersion(int protocolVersion);
     }
 
     /**
@@ -158,15 +156,10 @@ public interface Term
      */
     public abstract class NonTerminal implements Term
     {
-        public boolean usesFunction(String ksName, String functionName)
-        {
-            return false;
-        }
-
         public ByteBuffer bindAndGet(QueryOptions options) throws InvalidRequestException
         {
             Terminal t = bind(options);
-            return t == null ? null : t.get(options.getProtocolVersion());
+            return t == null ? null : t.get(options);
         }
     }
 }

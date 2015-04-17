@@ -18,7 +18,6 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -26,11 +25,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
-
 import org.github.jamm.Unmetered;
 
 /**
@@ -66,14 +63,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>
         };
     }
 
-    public static List<String> asCQLTypeStringList(List<AbstractType<?>> abstractTypes)
-    {
-        List<String> r = new ArrayList<>(abstractTypes.size());
-        for (AbstractType<?> abstractType : abstractTypes)
-            r.add(abstractType.asCQL3Type().toString());
-        return r;
-    }
-
     public T compose(ByteBuffer bytes)
     {
         return getSerializer().deserialize(bytes);
@@ -96,15 +85,10 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>
     /** get a byte representation of the given string. */
     public abstract ByteBuffer fromString(String source) throws MarshalException;
 
-    /** Given a parsed JSON string, return a byte representation of the object.
-     * @param parsed the result of parsing a json string
-     **/
-    public abstract Term fromJSONObject(Object parsed) throws MarshalException;
-
-    /** Converts a value to a JSON string. */
-    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    /** for compatibility with TimeUUID in CQL2. See TimeUUIDType (that overrides it). */
+    public ByteBuffer fromStringCQL2(String source) throws MarshalException
     {
-        return '"' + getSerializer().deserialize(buffer).toString() + '"';
+        return fromString(source);
     }
 
     /* validate that the byte array is a valid sequence for the type we are supposed to be comparing */

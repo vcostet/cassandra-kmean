@@ -20,13 +20,13 @@ package org.apache.cassandra.utils.vint;
 import java.io.IOException;
 import java.io.OutputStream;
 
-import org.apache.cassandra.io.util.UnbufferedDataOutputStreamPlus;
+import org.apache.cassandra.io.util.AbstractDataOutput;
 
 /**
  * Borrows idea from
  * https://developers.google.com/protocol-buffers/docs/encoding#varints
  */
-public class EncodedDataOutputStream extends UnbufferedDataOutputStreamPlus
+public class EncodedDataOutputStream extends AbstractDataOutput
 {
     private OutputStream out;
 

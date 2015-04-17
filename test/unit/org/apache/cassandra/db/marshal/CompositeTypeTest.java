@@ -19,30 +19,28 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.UUID;
 
-import org.junit.BeforeClass;
+import org.apache.cassandra.serializers.MarshalException;
 import org.junit.Test;
 import static org.junit.Assert.fail;
 import static org.junit.Assert.assertEquals;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.CellNames;
 import org.apache.cassandra.db.filter.QueryFilter;
-import org.apache.cassandra.locator.SimpleStrategy;
-import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.*;
 
-public class CompositeTypeTest
+public class CompositeTypeTest extends SchemaLoader
 {
-    private static final String KEYSPACE1 = "CompositeTypeTest";
-    private static final String CF_STANDARDCOMPOSITE = "StandardComposite";
+    private static final String cfName = "StandardComposite";
     private static final CompositeType comparator;
     static
     {
@@ -59,17 +57,6 @@ public class CompositeTypeTest
     {
         for (int i = 0; i < UUID_COUNT; ++i)
             uuids[i] = UUIDGen.getTimeUUID();
-    }
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        AbstractType<?> composite = CompositeType.getInstance(Arrays.asList(new AbstractType<?>[]{BytesType.instance, TimeUUIDType.instance, IntegerType.instance}));
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    CFMetaData.denseCFMetaData(KEYSPACE1, CF_STANDARDCOMPOSITE, composite));
     }
 
     @Test
@@ -177,8 +164,8 @@ public class CompositeTypeTest
     @Test
     public void testFullRound() throws Exception
     {
-        Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARDCOMPOSITE);
+        Keyspace keyspace = Keyspace.open("Keyspace1");
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfName);
 
         ByteBuffer cname1 = createCompositeKey("test1", null, -1, false);
         ByteBuffer cname2 = createCompositeKey("test1", uuids[0], 24, false);
@@ -187,15 +174,15 @@ public class CompositeTypeTest
         ByteBuffer cname5 = createCompositeKey("test2", uuids[1], 42, false);
 
         ByteBuffer key = ByteBufferUtil.bytes("k");
-        Mutation rm = new Mutation(KEYSPACE1, key);
+        Mutation rm = new Mutation("Keyspace1", key);
         addColumn(rm, cname5);
         addColumn(rm, cname1);
         addColumn(rm, cname4);
         addColumn(rm, cname2);
         addColumn(rm, cname3);
-        rm.applyUnsafe();
+        rm.apply();
 
-        ColumnFamily cf = cfs.getColumnFamily(QueryFilter.getIdentityFilter(Util.dk("k"), CF_STANDARDCOMPOSITE, System.currentTimeMillis()));
+        ColumnFamily cf = cfs.getColumnFamily(QueryFilter.getIdentityFilter(Util.dk("k"), cfName, System.currentTimeMillis()));
 
         Iterator<Cell> iter = cf.getSortedColumns().iterator();
 
@@ -271,7 +258,7 @@ public class CompositeTypeTest
 
     private void addColumn(Mutation rm, ByteBuffer cname)
     {
-        rm.add(CF_STANDARDCOMPOSITE, CellNames.simpleDense(cname), ByteBufferUtil.EMPTY_BYTE_BUFFER, 0);
+        rm.add(cfName, CellNames.simpleDense(cname), ByteBufferUtil.EMPTY_BYTE_BUFFER, 0);
     }
 
     private ByteBuffer createCompositeKey(String s, UUID uuid, int i, boolean lastIsOne)

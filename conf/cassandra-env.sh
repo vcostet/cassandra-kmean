@@ -160,68 +160,6 @@ then
     export MALLOC_ARENA_MAX=4
 fi
 
-# Cassandra uses an installed jemalloc via LD_PRELOAD / DYLD_INSERT_LIBRARIES by default to improve off-heap
-# memory allocation performance. The following code searches for an installed libjemalloc.dylib/.so/.1.so using
-# Linux and OS-X specific approaches.
-# To specify your own libjemalloc in a different path, configure the fully qualified path in CASSANDRA_LIBJEMALLOC.
-# To disable jemalloc at all set CASSANDRA_LIBJEMALLOC=-
-#
-#CASSANDRA_LIBJEMALLOC=
-#
-find_library()
-{
-    lname=$1
-    shift
-    lext=$1
-    shift
-    while [ ! -z $1 ] ; do
-        path=$1
-        shift
-        for dir in $(echo $path | tr ":" " ") ; do
-            if [ -d $dir ] ; then
-                if [ -f $dir/$lname$lext ] ; then
-                    echo $dir/$lname$lext
-                    return
-                fi
-            fi
-        done
-    done
-}
-case "`uname -s`" in
-    Linux)
-        if [ -z $CASSANDRA_LIBJEMALLOC ] ; then
-            which ldconfig > /dev/null 2>&1
-            if [ $? = 0 ] ; then
-                # e.g. for CentOS
-                dirs=`ldconfig -v 2>/dev/null | grep -v ^$'\t' | sed 's/^\([^:]*\):.*$/\1/'`
-            else
-                # e.g. for Debian, OpenSUSE
-                dirs="/lib64 /lib /usr/lib64 /usr/lib `cat /etc/ld.so.conf /etc/ld.so.conf.d/*.conf | grep '^/'`"
-            fi
-            CASSANDRA_LIBJEMALLOC=$(find_library libjemalloc .so $dirs)
-        fi
-        if [ -z $CASSANDRA_LIBJEMALLOC ] ; then
-            CASSANDRA_LIBJEMALLOC=$(find_library libjemalloc .so.1 $dirs)
-        fi
-        if [ ! -z $CASSANDRA_LIBJEMALLOC ] ; then
-            if [ "-" != "$CASSANDRA_LIBJEMALLOC" ] ; then
-                export LD_PRELOAD=$CASSANDRA_LIBJEMALLOC
-            fi
-        fi
-    ;;
-    Darwin)
-        if [ -z $CASSANDRA_LIBJEMALLOC ] ; then
-            CASSANDRA_LIBJEMALLOC=$(find_library libjemalloc .dylib $DYLD_LIBRARY_PATH ${DYLD_FALLBACK_LIBRARY_PATH-$HOME/lib:/usr/local/lib:/lib:/usr/lib})
-        fi
-        if [ ! -z $CASSANDRA_LIBJEMALLOC ] ; then
-            if [ "-" != "$CASSANDRA_LIBJEMALLOC" ] ; then
-                export DYLD_INSERT_LIBRARIES=$CASSANDRA_LIBJEMALLOC
-            fi
-        fi
-    ;;
-esac
-
-
 # Specifies the default port over which Cassandra will be available for
 # JMX connections.
 # For security reasons, you should not expose this port to the internet.  Firewall it if needed.
@@ -318,7 +256,6 @@ fi
 
 # uncomment to have Cassandra JVM log internal method compilation (developers only)
 # JVM_OPTS="$JVM_OPTS -XX:+UnlockDiagnosticVMOptions -XX:+LogCompilation"
-# JVM_OPTS="$JVM_OPTS -XX:+UnlockCommercialFeatures -XX:+FlightRecorder"
 
 # Prefer binding to IPv4 network intefaces (when net.ipv6.bindv6only=1). See
 # http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6342561 (short version:
@@ -358,11 +295,6 @@ fi
 # to control its listen address and port.
 #MX4J_ADDRESS="-Dmx4jaddress=127.0.0.1"
 #MX4J_PORT="-Dmx4jport=8081"
-
-# Cassandra uses SIGAR to capture OS metrics CASSANDRA-7838
-# for SIGAR we have to set the java.library.path
-# to the location of the native libraries.
-JVM_OPTS="$JVM_OPTS -Djava.library.path=$CASSANDRA_HOME/lib/sigar-bin"
 
 JVM_OPTS="$JVM_OPTS $MX4J_ADDRESS"
 JVM_OPTS="$JVM_OPTS $MX4J_PORT"

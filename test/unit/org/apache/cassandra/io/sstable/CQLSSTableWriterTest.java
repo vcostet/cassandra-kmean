@@ -57,7 +57,7 @@ public class CQLSSTableWriterTest
     }
 
     @AfterClass
-    public static void tearDown() throws Exception
+    public static void tearDown()
     {
         Config.setClientMode(false);
     }
@@ -81,7 +81,7 @@ public class CQLSSTableWriterTest
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                   .inDirectory(dataDir)
                                                   .forTable(schema)
-                                                  .withPartitioner(StorageService.getPartitioner())
+                                                  .withPartitioner(StorageService.instance.getPartitioner())
                                                   .using(insert).build();
 
         writer.addRow(0, "test1", 24);
@@ -140,29 +140,26 @@ public class CQLSSTableWriterTest
         // Check that the write respect the buffer size even if we only insert rows withing the same partition (#7360)
         // To do that simply, we use a writer with a buffer of 1MB, and write 2 rows in the same partition with a value
         // > 1MB and validate that this created more than 1 sstable.
-        String KS = "ks";
-        String TABLE = "test";
-
         File tempdir = Files.createTempDir();
-        File dataDir = new File(tempdir.getAbsolutePath() + File.separator + KS + File.separator + TABLE);
-        assert dataDir.mkdirs();
         String schema = "CREATE TABLE ks.test ("
-                      + "  k int PRIMARY KEY,"
-                      + "  v blob"
+                      + "  k int,"
+                      + "  c int,"
+                      + "  v blob,"
+                      + "  PRIMARY KEY (k,c)"
                       + ")";
-        String insert = "INSERT INTO ks.test (k, v) VALUES (?, ?)";
+        String insert = "INSERT INTO ks.test (k, c, v) VALUES (?, ?, ?)";
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
-                                                  .inDirectory(dataDir)
+                                                  .inDirectory(tempdir)
                                                   .forTable(schema)
-                                                  .withPartitioner(StorageService.getPartitioner())
+                                                  .withPartitioner(StorageService.instance.getPartitioner())
                                                   .using(insert)
                                                   .withBufferSizeInMB(1)
                                                   .build();
 
         ByteBuffer val = ByteBuffer.allocate(1024 * 1050);
 
-        writer.addRow(0, val);
-        writer.addRow(1, val);
+        writer.addRow(0, 0, val);
+        writer.addRow(0, 1, val);
         writer.close();
 
         FilenameFilter filterDataFiles = new FilenameFilter()
@@ -172,7 +169,7 @@ public class CQLSSTableWriterTest
                 return name.endsWith("-Data.db");
             }
         };
-        assert dataDir.list(filterDataFiles).length > 1 : Arrays.toString(dataDir.list(filterDataFiles));
+        assert tempdir.list(filterDataFiles).length > 1 : Arrays.toString(tempdir.list(filterDataFiles));
     }
 
 
@@ -222,8 +219,8 @@ public class CQLSSTableWriterTest
     @Test
     public void testConcurrentWriters() throws Exception
     {
-        final String KS = "cql_keyspace2";
-        final String TABLE = "table2";
+        String KS = "cql_keyspace2";
+        String TABLE = "table2";
 
         File tempdir = Files.createTempDir();
         File dataDir = new File(tempdir.getAbsolutePath() + File.separator + KS + File.separator + TABLE);
@@ -251,7 +248,7 @@ public class CQLSSTableWriterTest
         {
             public void init(String keyspace)
             {
-                for (Range<Token> range : StorageService.instance.getLocalRanges(KS))
+                for (Range<Token> range : StorageService.instance.getLocalRanges("cql_keyspace2"))
                     addRangeForEndpoint(range, FBUtilities.getBroadcastAddress());
                 setPartitioner(StorageService.getPartitioner());
             }

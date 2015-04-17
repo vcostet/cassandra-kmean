@@ -58,6 +58,4 @@ public interface CQLStatement
      * @param state the current query state
      */
     public ResultMessage executeInternal(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException;
-
-    boolean usesFunction(String ksName, String functionName);
 }

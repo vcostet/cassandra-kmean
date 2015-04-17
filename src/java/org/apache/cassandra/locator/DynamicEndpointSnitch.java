@@ -24,8 +24,6 @@ import java.net.UnknownHostException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-
-import com.codahale.metrics.ExponentiallyDecayingReservoir;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
@@ -35,6 +33,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import com.yammer.metrics.stats.ExponentiallyDecayingSample;
 
 /**
  * A dynamic snitch that sorts endpoints by latency with an adapted phi failure detector
@@ -55,8 +54,8 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
     private String mbeanName;
     private boolean registered = false;
 
-    private volatile HashMap<InetAddress, Double> scores = new HashMap<>();
-    private final ConcurrentHashMap<InetAddress, ExponentiallyDecayingReservoir> samples = new ConcurrentHashMap<>();
+    private volatile HashMap<InetAddress, Double> scores = new HashMap<InetAddress, Double>();
+    private final ConcurrentHashMap<InetAddress, ExponentiallyDecayingSample> samples = new ConcurrentHashMap<InetAddress, ExponentiallyDecayingSample>();
 
     public final IEndpointSnitch subsnitch;
 
@@ -218,10 +217,10 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
 
     public void receiveTiming(InetAddress host, long latency) // this is cheap
     {
-        ExponentiallyDecayingReservoir sample = samples.get(host);
+        ExponentiallyDecayingSample sample = samples.get(host);
         if (sample == null)
         {
-            ExponentiallyDecayingReservoir maybeNewSample = new ExponentiallyDecayingReservoir(WINDOW_SIZE, ALPHA);
+            ExponentiallyDecayingSample maybeNewSample = new ExponentiallyDecayingSample(WINDOW_SIZE, ALPHA);
             sample = samples.putIfAbsent(host, maybeNewSample);
             if (sample == null)
                 sample = maybeNewSample;
@@ -246,14 +245,14 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         // We're going to weight the latency for each host against the worst one we see, to
         // arrive at sort of a 'badness percentage' for them. First, find the worst for each:
         HashMap<InetAddress, Double> newScores = new HashMap<>();
-        for (Map.Entry<InetAddress, ExponentiallyDecayingReservoir> entry : samples.entrySet())
+        for (Map.Entry<InetAddress, ExponentiallyDecayingSample> entry : samples.entrySet())
         {
             double mean = entry.getValue().getSnapshot().getMedian();
             if (mean > maxLatency)
                 maxLatency = mean;
         }
         // now make another pass to do the weighting based on the maximums we found before
-        for (Map.Entry<InetAddress, ExponentiallyDecayingReservoir> entry: samples.entrySet())
+        for (Map.Entry<InetAddress, ExponentiallyDecayingSample> entry: samples.entrySet())
         {
             double score = entry.getValue().getSnapshot().getMedian() / maxLatency;
             // finally, add the severity without any weighting, since hosts scale this relative to their own load and the size of the task causing the severity.
@@ -268,7 +267,8 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
 
     private void reset()
     {
-       samples.clear();
+        for (ExponentiallyDecayingSample sample : samples.values())
+            sample.clear();
     }
 
     public Map<InetAddress, Double> getScores()
@@ -297,7 +297,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
     {
         InetAddress host = InetAddress.getByName(hostname);
         ArrayList<Double> timings = new ArrayList<Double>();
-        ExponentiallyDecayingReservoir sample = samples.get(host);
+        ExponentiallyDecayingSample sample = samples.get(host);
         if (sample != null)
         {
             for (double time: sample.getSnapshot().getValues())

@@ -21,20 +21,12 @@ import java.io.*;
 
 public abstract class AbstractDataInput extends InputStream implements DataInput
 {
-    public abstract void seek(long position) throws IOException;
-    public abstract long getPosition();
-    public abstract long getPositionLimit();
+    protected abstract void seekInternal(int position);
+    protected abstract int getPosition();
 
-    public int skipBytes(int n) throws IOException
-    {
-        if (n <= 0)
-            return 0;
-        long oldPosition = getPosition();
-        seek(Math.min(getPositionLimit(), oldPosition + n));
-        long skipped = getPosition() - oldPosition;
-        assert skipped >= 0 && skipped <= n;
-        return (int) skipped;
-    }
+    /*
+     !! DataInput methods below are copied from the implementation in Apache Harmony RandomAccessFile.
+     */
 
     /**
      * Reads a boolean from the current position in this file. Blocks until one
@@ -222,7 +214,7 @@ public abstract class AbstractDataInput extends InputStream implements DataInput
     public final String readLine() throws IOException {
         StringBuilder line = new StringBuilder(80); // Typical line length
         boolean foundTerminator = false;
-        long unreadPosition = -1;
+        int unreadPosition = 0;
         while (true) {
             int nextByte = read();
             switch (nextByte) {
@@ -230,7 +222,7 @@ public abstract class AbstractDataInput extends InputStream implements DataInput
                     return line.length() != 0 ? line.toString() : null;
                 case (byte) '\r':
                     if (foundTerminator) {
-                        seek(unreadPosition);
+                        seekInternal(unreadPosition);
                         return line.toString();
                     }
                     foundTerminator = true;
@@ -241,7 +233,7 @@ public abstract class AbstractDataInput extends InputStream implements DataInput
                     return line.toString();
                 default:
                     if (foundTerminator) {
-                        seek(unreadPosition);
+                        seekInternal(unreadPosition);
                         return line.toString();
                     }
                     line.append((char) nextByte);

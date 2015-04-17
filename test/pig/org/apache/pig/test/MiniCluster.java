@@ -22,7 +22,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.mapred.MiniMRCluster;
@@ -49,8 +48,6 @@ public class MiniCluster extends MiniGenericCluster {
 
             // Builds and starts the mini dfs and mapreduce clusters
             Configuration config = new Configuration();
-            if (FBUtilities.isWindows())
-                config.set("fs.file.impl", WindowsLocalFileSystem.class.getName());
             m_dfs = new MiniDFSCluster(config, dataNodes, true, null);
             m_fileSys = m_dfs.getFileSystem();
             m_mr = new MiniMRCluster(taskTrackers, m_fileSys.getUri().toString(), 1);
@@ -79,8 +76,7 @@ public class MiniCluster extends MiniGenericCluster {
 
     @Override
     protected void shutdownMiniMrClusters() {
-        if (m_mr != null)
-            m_mr.shutdown();
-        m_mr = null;
+        if (m_mr != null) { m_mr.shutdown(); }
+            m_mr = null;
     }
 }

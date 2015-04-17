@@ -43,7 +43,7 @@ public class LatencyMetricsTest
 
         for (int i = 0; i < 10000; i++)
         {
-            Double recent = l.latency.getOneMinuteRate();
+            Double recent = l.getRecentLatency();
             assertFalse(recent.equals(Double.POSITIVE_INFINITY));
         }
     }

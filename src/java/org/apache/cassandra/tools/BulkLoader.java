@@ -18,33 +18,33 @@
 package org.apache.cassandra.tools;
 
 import java.io.File;
-import java.net.InetAddress;
-import java.net.MalformedURLException;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.util.*;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
-import org.apache.commons.cli.*;
+import com.google.common.collect.Sets;
 
-import org.apache.cassandra.auth.PasswordAuthenticator;
+import org.apache.commons.cli.*;
+import org.apache.thrift.protocol.TBinaryProtocol;
+import org.apache.thrift.protocol.TProtocol;
+import org.apache.thrift.transport.TTransport;
+
+import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.config.*;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.SSTableLoader;
-import org.apache.cassandra.schema.LegacySchemaTables;
 import org.apache.cassandra.streaming.*;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.OutputHandler;
-import org.apache.thrift.protocol.TBinaryProtocol;
-import org.apache.thrift.protocol.TProtocol;
-import org.apache.thrift.transport.TTransport;
 
 public class BulkLoader
 {
@@ -185,7 +185,7 @@ public class BulkLoader
                 // recalculate progress across all sessions in all hosts and display
                 for (InetAddress peer : sessionsByHost.keySet())
                 {
-                    sb.append("[").append(peer).append("]");
+                    sb.append("[").append(peer.toString()).append("]");
 
                     for (SessionInfo session : sessionsByHost.get(peer))
                     {
@@ -303,7 +303,7 @@ public class BulkLoader
 
                     for (TokenRange tr : client.describe_ring(keyspace))
                     {
-                        Range<Token> range = new Range<>(tkFactory.fromString(tr.start_token), tkFactory.fromString(tr.end_token));
+                        Range<Token> range = new Range<>(tkFactory.fromString(tr.start_token), tkFactory.fromString(tr.end_token), getPartitioner());
                         for (String ep : tr.endpoints)
                         {
                             addRangeForEndpoint(range, InetAddress.getByName(ep));
@@ -311,9 +311,9 @@ public class BulkLoader
                     }
 
                     String cfQuery = String.format("SELECT * FROM %s.%s WHERE keyspace_name = '%s'",
-                                                   SystemKeyspace.NAME,
-                                                   LegacySchemaTables.COLUMNFAMILIES,
-                                                   keyspace);
+                                                 Keyspace.SYSTEM_KS,
+                                                 SystemKeyspace.SCHEMA_COLUMNFAMILIES_CF,
+                                                 keyspace);
                     CqlResult cfRes = client.execute_cql3_query(ByteBufferUtil.bytes(cfQuery), Compression.NONE, ConsistencyLevel.ONE);
 
 
@@ -321,13 +321,13 @@ public class BulkLoader
                     {
                         String columnFamily = UTF8Type.instance.getString(row.columns.get(1).bufferForName());
                         String columnsQuery = String.format("SELECT * FROM %s.%s WHERE keyspace_name = '%s' AND columnfamily_name = '%s'",
-                                                            SystemKeyspace.NAME,
-                                                            LegacySchemaTables.COLUMNS,
+                                                            Keyspace.SYSTEM_KS,
+                                                            SystemKeyspace.SCHEMA_COLUMNS_CF,
                                                             keyspace,
                                                             columnFamily);
                         CqlResult columnsRes = client.execute_cql3_query(ByteBufferUtil.bytes(columnsQuery), Compression.NONE, ConsistencyLevel.ONE);
 
-                        CFMetaData metadata = ThriftConversion.fromThriftCqlRow(row, columnsRes);
+                        CFMetaData metadata = CFMetaData.fromThriftCqlRow(row, columnsRes);
                         knownCfs.put(metadata.cfName, metadata);
                     }
                     break;
@@ -360,8 +360,8 @@ public class BulkLoader
             if (user != null && passwd != null)
             {
                 Map<String, String> credentials = new HashMap<>();
-                credentials.put(PasswordAuthenticator.USERNAME_KEY, user);
-                credentials.put(PasswordAuthenticator.PASSWORD_KEY, passwd);
+                credentials.put(IAuthenticator.USERNAME_KEY, user);
+                credentials.put(IAuthenticator.PASSWORD_KEY, passwd);
                 AuthenticationRequest authenticationRequest = new AuthenticationRequest(credentials);
                 client.login(authenticationRequest);
             }

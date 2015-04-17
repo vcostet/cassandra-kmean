@@ -24,18 +24,19 @@ import java.util.*;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterators;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
+import org.apache.cassandra.db.columniterator.SSTableSliceIterator;
 import org.apache.cassandra.db.composites.CType;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.tracing.Tracing;
@@ -181,12 +182,12 @@ public class SliceQueryFilter implements IDiskAtomFilter
 
     public OnDiskAtomIterator getSSTableColumnIterator(SSTableReader sstable, DecoratedKey key)
     {
-        return sstable.iterator(key, slices, reversed);
+        return new SSTableSliceIterator(sstable, key, slices, reversed);
     }
 
     public OnDiskAtomIterator getSSTableColumnIterator(SSTableReader sstable, FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry)
     {
-        return sstable.iterator(file, key, slices, reversed, indexEntry);
+        return new SSTableSliceIterator(sstable, file, key, slices, reversed, indexEntry);
     }
 
     public Comparator<Cell> getColumnComparator(CellNameType comparator)
@@ -213,52 +214,34 @@ public class SliceQueryFilter implements IDiskAtomFilter
 
             if (respectTombstoneThresholds() && columnCounter.ignored() > DatabaseDescriptor.getTombstoneFailureThreshold())
             {
-                Tracing.trace("Scanned over {} tombstones; query aborted (see tombstone_failure_threshold); slices={}",
-                              DatabaseDescriptor.getTombstoneFailureThreshold(), getSlicesInfo(container));
-
-                throw new TombstoneOverwhelmingException(columnCounter.ignored(),
-                                                         count,
-                                                         container.metadata().ksName,
-                                                         container.metadata().cfName,
-                                                         container.getComparator().getString(cell.name()),
-                                                         getSlicesInfo(container));
+                Tracing.trace("Scanned over {} tombstones; query aborted (see tombstone_failure_threshold)", DatabaseDescriptor.getTombstoneFailureThreshold());
+                logger.error("Scanned over {} tombstones in {}.{}; query aborted (see tombstone_failure_threshold)",
+                             DatabaseDescriptor.getTombstoneFailureThreshold(), container.metadata().ksName, container.metadata().cfName);
+                throw new TombstoneOverwhelmingException();
             }
 
             container.maybeAppendColumn(cell, tester, gcBefore);
         }
 
-        boolean warnTombstones = respectTombstoneThresholds() && columnCounter.ignored() > DatabaseDescriptor.getTombstoneWarnThreshold();
-        if (warnTombstones)
+        Tracing.trace("Read {} live and {} tombstoned cells", columnCounter.live(), columnCounter.ignored());
+        if (respectTombstoneThresholds() && columnCounter.ignored() > DatabaseDescriptor.getTombstoneWarnThreshold())
         {
-            logger.warn("Read {} live and {} tombstoned cells in {}.{} (see tombstone_warn_threshold). {} columns were requested, slices={}",
-                        columnCounter.live(),
-                        columnCounter.ignored(),
-                        container.metadata().ksName,
-                        container.metadata().cfName,
-                        count,
-                        getSlicesInfo(container));
-        }
-        Tracing.trace("Read {} live and {} tombstoned cells{}",
-                      columnCounter.live(),
-                      columnCounter.ignored(),
-                      warnTombstones ? " (see tombstone_warn_threshold)" : "");
-    }
+            StringBuilder sb = new StringBuilder();
+            CellNameType type = container.metadata().comparator;
+            for (ColumnSlice sl : slices)
+            {
+                assert sl != null;
 
-    private String getSlicesInfo(ColumnFamily container)
-    {
-        StringBuilder sb = new StringBuilder();
-        CellNameType type = container.metadata().comparator;
-        for (ColumnSlice sl : slices)
-        {
-            assert sl != null;
+                sb.append('[');
+                sb.append(type.getString(sl.start));
+                sb.append('-');
+                sb.append(type.getString(sl.finish));
+                sb.append(']');
+            }
 
-            sb.append('[');
-            sb.append(type.getString(sl.start));
-            sb.append('-');
-            sb.append(type.getString(sl.finish));
-            sb.append(']');
+            logger.warn("Read {} live and {} tombstoned cells in {}.{} (see tombstone_warn_threshold). {} columns was requested, slices={}",
+                        columnCounter.live(), columnCounter.ignored(), container.metadata().ksName, container.metadata().cfName, count, sb);
         }
-        return sb.toString();
     }
 
     protected boolean respectTombstoneThresholds()

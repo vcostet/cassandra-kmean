@@ -165,6 +165,7 @@ class LimitedLocalNodeFirstLocalBalancingPolicy implements LoadBalancingPolicy
         }
     }
 
+    @Override
     public void onSuspected(Host host)
     {
         // not supported by this load balancing policy

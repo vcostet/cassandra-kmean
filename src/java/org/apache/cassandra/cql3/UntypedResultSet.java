@@ -26,6 +26,7 @@ import com.google.common.collect.AbstractIterator;
 
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.pager.QueryPager;
 
 /** a utility for doing internal cql-based queries */
@@ -73,8 +74,8 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
         public Row one()
         {
-            if (cqlRows.size() != 1)
-                throw new IllegalStateException("One row required, " + cqlRows.size() + " found");
+            if (cqlRows.rows.size() != 1)
+                throw new IllegalStateException("One row required, " + cqlRows.rows.size() + " found");
             return new Row(cqlRows.metadata.names, cqlRows.rows.get(0));
         }
 
@@ -174,13 +175,17 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
                 protected Row computeNext()
                 {
-                    while (currentPage == null || !currentPage.hasNext())
-                    {
-                        if (pager.isExhausted())
-                            return endOfData();
-                        currentPage = select.process(pager.fetchPage(pageSize)).rows.iterator();
+                    try {
+                        while (currentPage == null || !currentPage.hasNext())
+                        {
+                            if (pager.isExhausted())
+                                return endOfData();
+                            currentPage = select.process(pager.fetchPage(pageSize)).rows.iterator();
+                        }
+                        return new Row(metadata, currentPage.next());
+                    } catch (RequestValidationException | RequestExecutionException e) {
+                        throw new RuntimeException(e);
                     }
-                    return new Row(metadata, currentPage.next());
                 }
             };
         }
@@ -212,11 +217,6 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         {
             // Note that containsKey won't work because we may have null values
             return data.get(column) != null;
-        }
-
-        public ByteBuffer getBlob(String column)
-        {
-            return data.get(column);
         }
 
         public String getString(String column)

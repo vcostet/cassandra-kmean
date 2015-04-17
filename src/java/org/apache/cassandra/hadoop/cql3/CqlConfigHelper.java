@@ -297,7 +297,7 @@ public class CqlConfigHelper
         Optional<AuthProvider> authProvider = getAuthProvider(conf);
         Optional<SSLOptions> sslOptions = getSSLOptions(conf);
         Optional<Integer> protocolVersion = getProtocolVersion(conf);
-        LoadBalancingPolicy loadBalancingPolicy = getReadLoadBalancingPolicy(hosts);
+        LoadBalancingPolicy loadBalancingPolicy = getReadLoadBalancingPolicy(conf, hosts);
         SocketOptions socketOptions = getReadSocketOptions(conf);
         QueryOptions queryOptions = getReadQueryOptions(conf);
         PoolingOptions poolingOptions = getReadPoolingOptions(conf);
@@ -488,7 +488,7 @@ public class CqlConfigHelper
         return socketOptions;
     }
 
-    private static LoadBalancingPolicy getReadLoadBalancingPolicy(final String[] stickHosts)
+    private static LoadBalancingPolicy getReadLoadBalancingPolicy(Configuration conf, final String[] stickHosts)
     {
         return new LimitedLocalNodeFirstLocalBalancingPolicy(stickHosts);
     }
@@ -535,7 +535,7 @@ public class CqlConfigHelper
         String setting = conf.get(parameter);
         if (setting == null)
             return Optional.absent();
-        return Optional.of(Integer.valueOf(setting));  
+        return Optional.of(Integer.parseInt(setting));  
     }
 
     private static Optional<Boolean> getBooleanSetting(String parameter, Configuration conf)
@@ -543,7 +543,7 @@ public class CqlConfigHelper
         String setting = conf.get(parameter);
         if (setting == null)
             return Optional.absent();
-        return Optional.of(Boolean.valueOf(setting));  
+        return Optional.of(Boolean.parseBoolean(setting));  
     }
 
     private static Optional<String> getStringSetting(String parameter, Configuration conf)

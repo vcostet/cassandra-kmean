@@ -20,37 +20,23 @@ package org.apache.cassandra.io.sstable;
 
 import java.util.*;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.junit.BeforeClass;
 import com.google.common.collect.Iterables;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.IdentityQueryFilter;
 import org.apache.cassandra.dht.*;
-import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.dht.AbstractBounds.isEmpty;
 import static org.junit.Assert.*;
 
-public class SSTableScannerTest
+public class SSTableScannerTest extends SchemaLoader
 {
-    public static final String KEYSPACE = "SSTableScannerTest";
+    public static final String KEYSPACE = "Keyspace1";
     public static final String TABLE = "Standard1";
-
-    @BeforeClass
-    public static void defineSchema() throws Exception
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE, TABLE));
-    }
 
     private static String toKey(int key)
     {
@@ -114,7 +100,7 @@ public class SSTableScannerTest
 
     private static Token token(int key)
     {
-        return key == Integer.MIN_VALUE ? ByteOrderedPartitioner.MINIMUM : new ByteOrderedPartitioner.BytesToken(toKey(key).getBytes());
+        return key == Integer.MIN_VALUE ? ByteOrderedPartitioner.MINIMUM : new BytesToken(toKey(key).getBytes());
     }
 
     private static RowPosition min(int key)
@@ -134,8 +120,8 @@ public class SSTableScannerTest
 
     private static Range<Token> rangeFor(int start, int end)
     {
-        return new Range<Token>(new ByteOrderedPartitioner.BytesToken(toKey(start).getBytes()),
-                                end == Integer.MIN_VALUE ? ByteOrderedPartitioner.MINIMUM : new ByteOrderedPartitioner.BytesToken(toKey(end).getBytes()));
+        return new Range<Token>(new BytesToken(toKey(start).getBytes()),
+                                end == Integer.MIN_VALUE ? ByteOrderedPartitioner.MINIMUM : new BytesToken(toKey(end).getBytes()));
     }
 
     private static Collection<Range<Token>> makeRanges(int ... keys)
@@ -152,7 +138,7 @@ public class SSTableScannerTest
         DecoratedKey decoratedKey = Util.dk(toKey(key));
         Mutation rm = new Mutation(KEYSPACE, decoratedKey.getKey());
         rm.add(TABLE, Util.cellname("col"), ByteBufferUtil.EMPTY_BYTE_BUFFER, timestamp, 1000);
-        rm.applyUnsafe();
+        rm.apply();
     }
 
     private static void assertScanMatches(SSTableReader sstable, int scanStart, int scanEnd, int ... boundaries)

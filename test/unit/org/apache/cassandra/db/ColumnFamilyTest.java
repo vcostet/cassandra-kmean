@@ -25,20 +25,13 @@ import java.nio.ByteBuffer;
 import java.util.TreeMap;
 
 import com.google.common.collect.Iterables;
-import org.apache.cassandra.config.CFMetaData;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.KSMetaData;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.context.CounterContext;
-import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.marshal.CounterColumnType;
 import org.apache.cassandra.io.sstable.ColumnStats;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
@@ -52,24 +45,9 @@ import static org.apache.cassandra.Util.tombstone;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
-public class ColumnFamilyTest
+public class ColumnFamilyTest extends SchemaLoader
 {
     static int version = MessagingService.current_version;
-    private static final String KEYSPACE1 = "Keyspace1";
-    private static final String CF_STANDARD1 = "Standard1";
-    private static final String CF_COUNTER1 = "Counter1";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1),
-                                    CFMetaData.denseCFMetaData(KEYSPACE1, CF_COUNTER1, BytesType.instance)
-                                              .defaultValidator(CounterColumnType.instance));
-    }
 
     // TODO test SuperColumns more
 
@@ -78,7 +56,7 @@ public class ColumnFamilyTest
     {
         ColumnFamily cf;
 
-        cf = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
+        cf = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
         cf.addColumn(column("C", "v", 1));
         DataOutputBuffer bufOut = new DataOutputBuffer();
         ColumnFamily.serializer.serialize(cf, bufOut, version);
@@ -86,7 +64,7 @@ public class ColumnFamilyTest
         ByteArrayInputStream bufIn = new ByteArrayInputStream(bufOut.getData(), 0, bufOut.getLength());
         cf = ColumnFamily.serializer.deserialize(new DataInputStream(bufIn), version);
         assert cf != null;
-        assert cf.metadata().cfName.equals(CF_STANDARD1);
+        assert cf.metadata().cfName.equals("Standard1");
         assert cf.getSortedColumns().size() == 1;
     }
 
@@ -102,7 +80,7 @@ public class ColumnFamilyTest
         }
 
         // write
-        cf = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
+        cf = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
         DataOutputBuffer bufOut = new DataOutputBuffer();
         for (String cName : map.navigableKeySet())
         {
@@ -124,7 +102,7 @@ public class ColumnFamilyTest
     @Test
     public void testGetColumnCount()
     {
-        ColumnFamily cf = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
+        ColumnFamily cf = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
 
         cf.addColumn(column("col1", "", 1));
         cf.addColumn(column("col2", "", 2));
@@ -137,8 +115,8 @@ public class ColumnFamilyTest
     @Test
     public void testDigest()
     {
-        ColumnFamily cf = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
-        ColumnFamily cf2 = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
+        ColumnFamily cf = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
+        ColumnFamily cf2 = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
 
         ByteBuffer digest = ColumnFamily.digest(cf);
 
@@ -179,7 +157,7 @@ public class ColumnFamilyTest
     @Test
     public void testTimestamp()
     {
-        ColumnFamily cf = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
+        ColumnFamily cf = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
 
         cf.addColumn(column("col1", "val1", 2));
         cf.addColumn(column("col1", "val2", 2)); // same timestamp, new value
@@ -191,9 +169,9 @@ public class ColumnFamilyTest
     @Test
     public void testMergeAndAdd()
     {
-        ColumnFamily cf_new = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
-        ColumnFamily cf_old = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
-        ColumnFamily cf_result = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
+        ColumnFamily cf_new = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
+        ColumnFamily cf_old = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
+        ColumnFamily cf_result = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
         ByteBuffer val = ByteBufferUtil.bytes("sample value");
         ByteBuffer val2 = ByteBufferUtil.bytes("x value ");
 
@@ -229,7 +207,7 @@ public class ColumnFamilyTest
         long timestamp = System.currentTimeMillis();
         int localDeletionTime = (int) (System.currentTimeMillis() / 1000);
 
-        ColumnFamily cf = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_STANDARD1);
+        ColumnFamily cf = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
         cf.delete(new DeletionInfo(timestamp, localDeletionTime));
         ColumnStats stats = cf.getColumnStats();
         assertEquals(timestamp, stats.maxTimestamp);
@@ -262,14 +240,14 @@ public class ColumnFamilyTest
         assertTrue(counter.reconcile(tombstone) == tombstone);
 
         // check that a range tombstone overrides the counter cell, even with a lower timestamp than the counter
-        ColumnFamily cf0 = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_COUNTER1);
+        ColumnFamily cf0 = ArrayBackedSortedColumns.factory.create("Keyspace1", "Counter1");
         cf0.addColumn(counter);
         cf0.delete(new RangeTombstone(cellname("counter0"), cellname("counter2"), 0L, (int) (System.currentTimeMillis() / 1000)));
         assertTrue(cf0.deletionInfo().isDeleted(counter));
         assertTrue(cf0.deletionInfo().inOrderTester(false).isDeleted(counter));
 
         // check that a top-level deletion info overrides the counter cell, even with a lower timestamp than the counter
-        ColumnFamily cf1 = ArrayBackedSortedColumns.factory.create(KEYSPACE1, CF_COUNTER1);
+        ColumnFamily cf1 = ArrayBackedSortedColumns.factory.create("Keyspace1", "Counter1");
         cf1.addColumn(counter);
         cf1.delete(new DeletionInfo(0L, (int) (System.currentTimeMillis() / 1000)));
         assertTrue(cf1.deletionInfo().isDeleted(counter));

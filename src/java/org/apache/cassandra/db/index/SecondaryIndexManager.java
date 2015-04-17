@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.Future;
 
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,10 +51,10 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.filter.ExtendedFilter;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -273,7 +274,15 @@ public class SecondaryIndexManager
 
         assert cdef.getIndexType() != null;
 
-        SecondaryIndex index = SecondaryIndex.createInstance(baseCfs, cdef);
+        SecondaryIndex index;
+        try
+        {
+            index = SecondaryIndex.createInstance(baseCfs, cdef);
+        }
+        catch (ConfigurationException e)
+        {
+            throw new RuntimeException(e);
+        }
 
         // Keep a single instance of the index per-cf for row level indexes
         // since we want all columns to be under the index
@@ -656,15 +665,6 @@ public class SecondaryIndexManager
             if (idxNames.contains(index.getIndexName()))
                 result.add(index);
         return result;
-    }
-
-    public SecondaryIndex getIndexByName(String idxName)
-    {
-        for (SecondaryIndex index : allIndexes)
-            if (idxName.equals(index.getIndexName()))
-                return index;
-
-        return null;
     }
 
     public void setIndexBuilt(Set<String> idxNames)

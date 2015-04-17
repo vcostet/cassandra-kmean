@@ -35,7 +35,7 @@ public class OrderPreservingPartitionerTest extends PartitionerTestCase
 
     public void initPartitioner()
     {
-        partitioner = OrderPreservingPartitioner.instance;
+        partitioner = new OrderPreservingPartitioner();
     }
 
     @Test

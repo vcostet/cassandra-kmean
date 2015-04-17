@@ -24,40 +24,22 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.BeforeClass;
 import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.KSMetaData;
-import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.sstable.SSTableUtils;
-import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import static org.junit.Assert.assertEquals;
 
-public class LongCompactionsTest
+public class LongCompactionsTest extends SchemaLoader
 {
     public static final String KEYSPACE1 = "Keyspace1";
-    public static final String CF_STANDARD = "Standard1";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        Map<String, String> compactionOptions = new HashMap<>();
-        compactionOptions.put("tombstone_compaction_interval", "1");
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD)
-                                                .compactionStrategyOptions(compactionOptions));
-    }
 
     @Before
     public void cleanupFiles()
@@ -101,7 +83,7 @@ public class LongCompactionsTest
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard1");
 
-        ArrayList<SSTableReader> sstables = new ArrayList<>();
+        ArrayList<SSTableReader> sstables = new ArrayList<SSTableReader>();
         for (int k = 0; k < sstableCount; k++)
         {
             SortedMap<String,ColumnFamily> rows = new TreeMap<String,ColumnFamily>();
@@ -114,7 +96,7 @@ public class LongCompactionsTest
                     // last sstable has highest timestamps
                     cols[i] = Util.column(String.valueOf(i), String.valueOf(i), k);
                 }
-                rows.put(key, SSTableUtils.createCF(KEYSPACE1, CF_STANDARD, Long.MIN_VALUE, Integer.MIN_VALUE, cols));
+                rows.put(key, SSTableUtils.createCF(Long.MIN_VALUE, Integer.MIN_VALUE, cols));
             }
             SSTableReader sstable = SSTableUtils.prepare().write(rows);
             sstables.add(sstable);
@@ -137,7 +119,7 @@ public class LongCompactionsTest
     }
 
     @Test
-    public void testStandardColumnCompactions()
+    public void testStandardColumnCompactions() throws IOException, ExecutionException, InterruptedException
     {
         // this test does enough rows to force multiple block indexes to be used
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
@@ -178,7 +160,7 @@ public class LongCompactionsTest
         cfs.truncateBlocking();
     }
 
-    private void forceCompactions(ColumnFamilyStore cfs)
+    private void forceCompactions(ColumnFamilyStore cfs) throws ExecutionException, InterruptedException
     {
         // re-enable compaction with thresholds low enough to force a few rounds
         cfs.setCompactionThresholds(2, 4);
@@ -196,7 +178,7 @@ public class LongCompactionsTest
 
         if (cfs.getSSTables().size() > 1)
         {
-            CompactionManager.instance.performMaximal(cfs, false);
+            CompactionManager.instance.performMaximal(cfs);
         }
     }
 }

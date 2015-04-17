@@ -64,9 +64,9 @@ public class CQLMetricsTest extends SchemaLoader
     @Test
     public void testPreparedStatementsCount()
     {
-        assertEquals(0, (int) QueryProcessor.metrics.preparedStatementsCount.getValue());
+        assertEquals(0, (int) QueryProcessor.metrics.preparedStatementsCount.value());
         metricsStatement = session.prepare("INSERT INTO junit.metricstest (id, val) VALUES (?, ?)");
-        assertEquals(1, (int) QueryProcessor.metrics.preparedStatementsCount.getValue());
+        assertEquals(1, (int) QueryProcessor.metrics.preparedStatementsCount.value());
     }
 
     @Test
@@ -74,14 +74,14 @@ public class CQLMetricsTest extends SchemaLoader
     {
         clearMetrics();
 
-        assertEquals(0, QueryProcessor.metrics.preparedStatementsExecuted.getCount());
-        assertEquals(0, QueryProcessor.metrics.regularStatementsExecuted.getCount());
+        assertEquals(0, QueryProcessor.metrics.preparedStatementsExecuted.count());
+        assertEquals(0, QueryProcessor.metrics.regularStatementsExecuted.count());
 
         for (int i = 0; i < 10; i++)
             session.execute(String.format("INSERT INTO junit.metricstest (id, val) VALUES (%d, '%s')", i, "val" + i));
 
-        assertEquals(0, QueryProcessor.metrics.preparedStatementsExecuted.getCount());
-        assertEquals(10, QueryProcessor.metrics.regularStatementsExecuted.getCount());
+        assertEquals(0, QueryProcessor.metrics.preparedStatementsExecuted.count());
+        assertEquals(10, QueryProcessor.metrics.regularStatementsExecuted.count());
     }
 
     @Test
@@ -89,14 +89,14 @@ public class CQLMetricsTest extends SchemaLoader
     {
         clearMetrics();
 
-        assertEquals(0, QueryProcessor.metrics.preparedStatementsExecuted.getCount());
-        assertEquals(0, QueryProcessor.metrics.regularStatementsExecuted.getCount());
+        assertEquals(0, QueryProcessor.metrics.preparedStatementsExecuted.count());
+        assertEquals(0, QueryProcessor.metrics.regularStatementsExecuted.count());
 
         for (int i = 0; i < 10; i++)
             session.execute(metricsStatement.bind(i, "val" + i));
 
-        assertEquals(10, QueryProcessor.metrics.preparedStatementsExecuted.getCount());
-        assertEquals(0, QueryProcessor.metrics.regularStatementsExecuted.getCount());
+        assertEquals(10, QueryProcessor.metrics.preparedStatementsExecuted.count());
+        assertEquals(0, QueryProcessor.metrics.regularStatementsExecuted.count());
     }
 
     @Test
@@ -104,22 +104,22 @@ public class CQLMetricsTest extends SchemaLoader
     {
         clearMetrics();
 
-        assertEquals(Double.NaN, QueryProcessor.metrics.preparedStatementsRatio.getValue());
+        assertEquals(Double.NaN, QueryProcessor.metrics.preparedStatementsRatio.value());
 
         for (int i = 0; i < 10; i++)
             session.execute(metricsStatement.bind(i, "val" + i));
-        assertEquals(1.0, QueryProcessor.metrics.preparedStatementsRatio.getValue());
+        assertEquals(1.0, QueryProcessor.metrics.preparedStatementsRatio.value());
 
         for (int i = 0; i < 10; i++)
             session.execute(String.format("INSERT INTO junit.metricstest (id, val) VALUES (%d, '%s')", i, "val" + i));
-        assertEquals(0.5, QueryProcessor.metrics.preparedStatementsRatio.getValue());
+        assertEquals(0.5, QueryProcessor.metrics.preparedStatementsRatio.value());
     }
 
     private void clearMetrics()
     {
-        QueryProcessor.metrics.preparedStatementsExecuted.dec(QueryProcessor.metrics.preparedStatementsExecuted.getCount());
-        QueryProcessor.metrics.regularStatementsExecuted.dec(QueryProcessor.metrics.regularStatementsExecuted.getCount());
-        QueryProcessor.metrics.preparedStatementsEvicted.dec(QueryProcessor.metrics.preparedStatementsEvicted.getCount());
+        QueryProcessor.metrics.preparedStatementsExecuted.clear();
+        QueryProcessor.metrics.regularStatementsExecuted.clear();
+        QueryProcessor.metrics.preparedStatementsEvicted.clear();
     }
 }
 

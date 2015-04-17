@@ -27,9 +27,9 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class ExpiredTraceState extends TraceState
 {
-    public ExpiredTraceState(UUID sessionId, Tracing.TraceType traceType)
+    public ExpiredTraceState(UUID sessionId)
     {
-        super(FBUtilities.getBroadcastAddress(), sessionId, traceType);
+        super(FBUtilities.getBroadcastAddress(), sessionId);
     }
 
     public int elapsed()

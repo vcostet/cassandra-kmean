@@ -19,18 +19,18 @@ package org.apache.cassandra.metrics;
 
 import java.util.*;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-import com.codahale.metrics.Counter;
-import com.codahale.metrics.Gauge;
-import com.codahale.metrics.Meter;
+import com.yammer.metrics.Metrics;
+import com.yammer.metrics.core.Counter;
+import com.yammer.metrics.core.Gauge;
+import com.yammer.metrics.core.Meter;
 
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionManager;
-
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
  * Metrics for compaction.
@@ -53,9 +53,9 @@ public class CompactionMetrics implements CompactionManager.CompactionExecutorSt
 
     public CompactionMetrics(final ThreadPoolExecutor... collectors)
     {
-        pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), new Gauge<Integer>()
+        pendingTasks = Metrics.newGauge(factory.createMetricName("PendingTasks"), new Gauge<Integer>()
         {
-            public Integer getValue()
+            public Integer value()
             {
                 int n = 0;
                 for (String keyspaceName : Schema.instance.getKeyspaces())
@@ -68,9 +68,9 @@ public class CompactionMetrics implements CompactionManager.CompactionExecutorSt
                 return n;
             }
         });
-        completedTasks = Metrics.register(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
+        completedTasks = Metrics.newGauge(factory.createMetricName("CompletedTasks"), new Gauge<Long>()
         {
-            public Long getValue()
+            public Long value()
             {
                 long completedTasks = 0;
                 for (ThreadPoolExecutor collector : collectors)
@@ -78,8 +78,8 @@ public class CompactionMetrics implements CompactionManager.CompactionExecutorSt
                 return completedTasks;
             }
         });
-        totalCompactionsCompleted = Metrics.meter(factory.createMetricName("TotalCompactionsCompleted"));
-        bytesCompacted = Metrics.counter(factory.createMetricName("BytesCompacted"));
+        totalCompactionsCompleted = Metrics.newMeter(factory.createMetricName("TotalCompactionsCompleted"), "compaction completed", TimeUnit.SECONDS);
+        bytesCompacted = Metrics.newCounter(factory.createMetricName("BytesCompacted"));
     }
 
     public void beginCompaction(CompactionInfo.Holder ci)

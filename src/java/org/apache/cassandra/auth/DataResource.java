@@ -17,10 +17,7 @@
  */
 package org.apache.cassandra.auth;
 
-import java.util.Set;
-
 import com.google.common.base.Objects;
-import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.config.Schema;
@@ -28,57 +25,44 @@ import org.apache.cassandra.config.Schema;
 /**
  * The primary type of resource in Cassandra.
  *
- * Used to represent a table or a keyspace or the root level "data" resource.
+ * Used to represent a column family or a keyspace or the root level "data" resource.
  * "data"                                 - the root level data resource.
  * "data/keyspace_name"                   - keyspace-level data resource.
- * "data/keyspace_name/table_name"        - table-level data resource.
+ * "data/keyspace_name/column_family_name" - cf-level data resource.
  */
 public class DataResource implements IResource
 {
     enum Level
     {
-        ROOT, KEYSPACE, TABLE
+        ROOT, KEYSPACE, COLUMN_FAMILY
     }
 
-    // permissions which may be granted on tables
-    private static final Set<Permission> TABLE_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.ALTER,
-                                                                                         Permission.DROP,
-                                                                                         Permission.SELECT,
-                                                                                         Permission.MODIFY,
-                                                                                         Permission.AUTHORIZE);
-    // permissions which may be granted on one or all keyspaces
-    private static final Set<Permission> KEYSPACE_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.CREATE,
-                                                                                            Permission.ALTER,
-                                                                                            Permission.DROP,
-                                                                                            Permission.SELECT,
-                                                                                            Permission.MODIFY,
-                                                                                            Permission.AUTHORIZE);
     private static final String ROOT_NAME = "data";
     private static final DataResource ROOT_RESOURCE = new DataResource();
 
     private final Level level;
     private final String keyspace;
-    private final String table;
+    private final String columnFamily;
 
     private DataResource()
     {
         level = Level.ROOT;
         keyspace = null;
-        table = null;
+        columnFamily = null;
     }
 
     private DataResource(String keyspace)
     {
         level = Level.KEYSPACE;
         this.keyspace = keyspace;
-        table = null;
+        columnFamily = null;
     }
 
-    private DataResource(String keyspace, String table)
+    private DataResource(String keyspace, String columnFamily)
     {
-        level = Level.TABLE;
+        level = Level.COLUMN_FAMILY;
         this.keyspace = keyspace;
-        this.table = table;
+        this.columnFamily = columnFamily;
     }
 
     /**
@@ -101,15 +85,15 @@ public class DataResource implements IResource
     }
 
     /**
-     * Creates a DataResource instance representing a table.
+     * Creates a DataResource instance representing a column family.
      *
      * @param keyspace Name of the keyspace.
-     * @param table Name of the table.
+     * @param columnFamily Name of the column family.
      * @return DataResource instance representing the column family.
      */
-    public static DataResource table(String keyspace, String table)
+    public static DataResource columnFamily(String keyspace, String columnFamily)
     {
-        return new DataResource(keyspace, table);
+        return new DataResource(keyspace, columnFamily);
     }
 
     /**
@@ -131,7 +115,7 @@ public class DataResource implements IResource
         if (parts.length == 2)
             return keyspace(parts[1]);
 
-        return table(parts[1], parts[2]);
+        return columnFamily(parts[1], parts[2]);
     }
 
     /**
@@ -145,8 +129,8 @@ public class DataResource implements IResource
                 return ROOT_NAME;
             case KEYSPACE:
                 return String.format("%s/%s", ROOT_NAME, keyspace);
-            case TABLE:
-                return String.format("%s/%s/%s", ROOT_NAME, keyspace, table);
+            case COLUMN_FAMILY:
+                return String.format("%s/%s/%s", ROOT_NAME, keyspace, columnFamily);
         }
         throw new AssertionError();
     }
@@ -160,7 +144,7 @@ public class DataResource implements IResource
         {
             case KEYSPACE:
                 return root();
-            case TABLE:
+            case COLUMN_FAMILY:
                 return keyspace(keyspace);
         }
         throw new IllegalStateException("Root-level resource can't have a parent");
@@ -168,17 +152,17 @@ public class DataResource implements IResource
 
     public boolean isRootLevel()
     {
-        return level == Level.ROOT;
+        return level.equals(Level.ROOT);
     }
 
     public boolean isKeyspaceLevel()
     {
-        return level == Level.KEYSPACE;
+        return level.equals(Level.KEYSPACE);
     }
 
-    public boolean isTableLevel()
+    public boolean isColumnFamilyLevel()
     {
-        return level == Level.TABLE;
+        return level.equals(Level.COLUMN_FAMILY);
     }
     /**
      * @return keyspace of the resource. Throws IllegalStateException if it's the root-level resource.
@@ -191,14 +175,13 @@ public class DataResource implements IResource
     }
 
     /**
-     @Override
-     * @return column family of the resource. Throws IllegalStateException if it's not a table-level resource.
+     * @return column family of the resource. Throws IllegalStateException if it's not a cf-level resource.
      */
-    public String getTable()
+    public String getColumnFamily()
     {
-        if (!isTableLevel())
-            throw new IllegalStateException(String.format("%s data resource has no table", level));
-        return table;
+        if (!isColumnFamilyLevel())
+            throw new IllegalStateException(String.format("%s data resource has no column family", level));
+        return columnFamily;
     }
 
     /**
@@ -206,7 +189,7 @@ public class DataResource implements IResource
      */
     public boolean hasParent()
     {
-        return level != Level.ROOT;
+        return !level.equals(Level.ROOT);
     }
 
     /**
@@ -220,21 +203,8 @@ public class DataResource implements IResource
                 return true;
             case KEYSPACE:
                 return Schema.instance.getKeyspaces().contains(keyspace);
-            case TABLE:
-                return Schema.instance.getCFMetaData(keyspace, table) != null;
-        }
-        throw new AssertionError();
-    }
-
-    public Set<Permission> applicablePermissions()
-    {
-        switch (level)
-        {
-            case ROOT:
-            case KEYSPACE:
-                return KEYSPACE_LEVEL_PERMISSIONS;
-            case TABLE:
-                return TABLE_LEVEL_PERMISSIONS;
+            case COLUMN_FAMILY:
+                return Schema.instance.getCFMetaData(keyspace, columnFamily) != null;
         }
         throw new AssertionError();
     }
@@ -248,8 +218,8 @@ public class DataResource implements IResource
                 return "<all keyspaces>";
             case KEYSPACE:
                 return String.format("<keyspace %s>", keyspace);
-            case TABLE:
-                return String.format("<table %s.%s>", keyspace, table);
+            case COLUMN_FAMILY:
+                return String.format("<table %s.%s>", keyspace, columnFamily);
         }
         throw new AssertionError();
     }
@@ -267,12 +237,12 @@ public class DataResource implements IResource
 
         return Objects.equal(level, ds.level)
             && Objects.equal(keyspace, ds.keyspace)
-            && Objects.equal(table, ds.table);
+            && Objects.equal(columnFamily, ds.columnFamily);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(level, keyspace, table);
+        return Objects.hashCode(level, keyspace, columnFamily);
     }
 }

@@ -26,53 +26,36 @@ import java.io.IOException;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.SimpleStrategy;
-import org.junit.BeforeClass;
 import org.junit.Test;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Test for the truncate operation.
  */
-public class RecoveryManagerTruncateTest
+public class RecoveryManagerTruncateTest extends SchemaLoader
 {
-    private static final String KEYSPACE1 = "RecoveryManagerTruncateTest";
-    private static final String CF_STANDARD1 = "Standard1";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1));
-    }
-
 	@Test
 	public void testTruncate() throws IOException
 	{
-		Keyspace keyspace = Keyspace.open(KEYSPACE1);
+		Keyspace keyspace = Keyspace.open("Keyspace1");
 		ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Standard1");
 
 		Mutation rm;
 		ColumnFamily cf;
 
 		// add a single cell
-        cf = ArrayBackedSortedColumns.factory.create(KEYSPACE1, "Standard1");
+        cf = ArrayBackedSortedColumns.factory.create("Keyspace1", "Standard1");
 		cf.addColumn(column("col1", "val1", 1L));
-        rm = new Mutation(KEYSPACE1, ByteBufferUtil.bytes("keymulti"), cf);
-		rm.applyUnsafe();
+        rm = new Mutation("Keyspace1", ByteBufferUtil.bytes("keymulti"), cf);
+		rm.apply();
 
 		// Make sure data was written
 		assertNotNull(getFromTable(keyspace, "Standard1", "keymulti", "col1"));
 
 		// and now truncate it
 		cfs.truncateBlocking();
-        CommitLog.instance.resetUnsafe(false);
+        CommitLog.instance.resetUnsafe();
 		CommitLog.instance.recover();
 
 		// and validate truncation.

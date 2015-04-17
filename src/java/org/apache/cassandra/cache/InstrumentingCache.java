@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cache;
 
-import java.util.Iterator;
+import java.util.Set;
 
 import org.apache.cassandra.metrics.CacheMetrics;
 
@@ -26,6 +26,7 @@ import org.apache.cassandra.metrics.CacheMetrics;
  */
 public class InstrumentingCache<K, V>
 {
+    private volatile boolean capacitySetManually;
     private final ICache<K, V> map;
     private final String type;
 
@@ -77,9 +78,20 @@ public class InstrumentingCache<K, V>
         return map.capacity();
     }
 
-    public void setCapacity(long capacity)
+    public boolean isCapacitySetManually()
+    {
+        return capacitySetManually;
+    }
+
+    public void updateCapacity(long capacity)
     {
         map.setCapacity(capacity);
+    }
+
+    public void setCapacity(long capacity)
+    {
+        updateCapacity(capacity);
+        capacitySetManually = true;
     }
 
     public int size()
@@ -98,14 +110,14 @@ public class InstrumentingCache<K, V>
         metrics = new CacheMetrics(type, map);
     }
 
-    public Iterator<K> keyIterator()
+    public Set<K> getKeySet()
     {
-        return map.keyIterator();
+        return map.keySet();
     }
 
-    public Iterator<K> hotKeyIterator(int n)
+    public Set<K> hotKeySet(int n)
     {
-        return map.hotKeyIterator(n);
+        return map.hotKeySet(n);
     }
 
     public boolean containsKey(K key)

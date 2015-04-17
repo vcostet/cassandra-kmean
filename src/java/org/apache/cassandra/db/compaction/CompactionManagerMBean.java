@@ -33,13 +33,40 @@ public interface CompactionManagerMBean
     public TabularData getCompactionHistory();
 
     /**
+     * @see org.apache.cassandra.metrics.CompactionMetrics#pendingTasks
+     * @return estimated number of compactions remaining to perform
+     */
+    @Deprecated
+    public int getPendingTasks();
+
+    /**
+     * @see org.apache.cassandra.metrics.CompactionMetrics#completedTasks
+     * @return number of completed compactions since server [re]start
+     */
+    @Deprecated
+    public long getCompletedTasks();
+
+    /**
+     * @see org.apache.cassandra.metrics.CompactionMetrics#bytesCompacted
+     * @return total number of bytes compacted since server [re]start
+     */
+    @Deprecated
+    public long getTotalBytesCompacted();
+
+    /**
+     * @see org.apache.cassandra.metrics.CompactionMetrics#totalCompactionsCompleted
+     * @return total number of compactions since server [re]start
+     */
+    @Deprecated
+    public long getTotalCompactionsCompleted();
+
+    /**
      * Triggers the compaction of user specified sstables.
      * You can specify files from various keyspaces and columnfamilies.
      * If you do so, user defined compaction is performed several times to the groups of files
      * in the same keyspace/columnfamily.
      *
-     * @param dataFiles a comma separated list of sstable file to compact.
-     *                  must contain keyspace and columnfamily name in path(for 2.1+) or file name itself.
+     * @param dataFiles a comma separated list of sstable filename to compact
      */
     public void forceUserDefinedCompaction(String dataFiles);
 

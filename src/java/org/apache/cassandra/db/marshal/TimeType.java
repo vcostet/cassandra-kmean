@@ -19,8 +19,6 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.cql3.Constants;
-import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TimeSerializer;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.serializers.TypeSerializer;
@@ -60,26 +58,6 @@ public class TimeType extends AbstractType<Long>
     public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
         return this == otherType || otherType == LongType.instance;
-    }
-
-    @Override
-    public Term fromJSONObject(Object parsed) throws MarshalException
-    {
-        try
-        {
-            return new Constants.Value(fromString((String) parsed));
-        }
-        catch (ClassCastException exc)
-        {
-            throw new MarshalException(String.format(
-                    "Expected a string representation of a time value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
-        }
-    }
-
-    @Override
-    public String toJSONString(ByteBuffer buffer, int protocolVersion)
-    {
-        return '"' + TimeSerializer.instance.toString(TimeSerializer.instance.deserialize(buffer)) + '"';
     }
 
     public CQL3Type asCQL3Type()

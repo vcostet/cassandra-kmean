@@ -32,13 +32,13 @@ public class ThrottledReader extends RandomAccessReader
 
     protected ThrottledReader(File file, long overrideLength, RateLimiter limiter) throws FileNotFoundException
     {
-        super(file, RandomAccessReader.DEFAULT_BUFFER_SIZE, overrideLength, false, null);
+        super(file, RandomAccessReader.DEFAULT_BUFFER_SIZE, overrideLength, null);
         this.limiter = limiter;
     }
 
     protected void reBuffer()
     {
-        limiter.acquire(buffer.capacity());
+        limiter.acquire(buffer.length);
         super.reBuffer();
     }
 

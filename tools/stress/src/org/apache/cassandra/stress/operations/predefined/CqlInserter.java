@@ -42,9 +42,10 @@ public class CqlInserter extends CqlOperation<Integer>
     @Override
     protected String buildQuery()
     {
-        StringBuilder query = new StringBuilder("UPDATE ").append(wrapInQuotes(type.table));
-        if (settings.columns.timestamp != null)
-            query.append(" USING TIMESTAMP ").append(settings.columns.timestamp);
+        StringBuilder query = new StringBuilder("UPDATE ").append(wrapInQuotesIfRequired(type.table));
+
+        if (isCql2())
+            query.append(" USING CONSISTENCY ").append(settings.command.consistencyLevel);
 
         query.append(" SET ");
 
@@ -53,7 +54,7 @@ public class CqlInserter extends CqlOperation<Integer>
             if (i > 0)
                 query.append(',');
 
-            query.append(wrapInQuotes(settings.columns.namestrs.get(i))).append(" = ?");
+            query.append(wrapInQuotesIfRequired(settings.columns.namestrs.get(i))).append(" = ?");
         }
 
         query.append(" WHERE KEY=?");

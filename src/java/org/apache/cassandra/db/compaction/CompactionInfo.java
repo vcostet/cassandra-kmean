@@ -23,7 +23,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.service.StorageService;
 
 /** Implements serializable to allow structured info to be returned via JMX. */
@@ -122,7 +121,7 @@ public final class CompactionInfo implements Serializable
     {
         private volatile boolean stopRequested = false;
         public abstract CompactionInfo getCompactionInfo();
-        double load = StorageMetrics.load.getCount();
+        double load = StorageService.instance.getLoad();
         double reportedSeverity = 0d;
 
         public void stop()

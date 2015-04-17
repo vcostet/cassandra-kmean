@@ -17,14 +17,18 @@
  */
 package org.apache.cassandra.transport.messages;
 
-import java.nio.ByteBuffer;
-
-import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.auth.AuthenticatedUser;
-import org.apache.cassandra.auth.IAuthenticator;
+import org.apache.cassandra.auth.ISaslAwareAuthenticator.SaslAuthenticator;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.transport.*;
+import org.apache.cassandra.transport.CBUtil;
+import org.apache.cassandra.transport.Message;
+import org.apache.cassandra.transport.ProtocolException;
+import org.apache.cassandra.transport.ServerConnection;
+
+import io.netty.buffer.ByteBuf;
+
+import java.nio.ByteBuffer;
 
 /**
  * A SASL token message sent from client to server. Some SASL
@@ -57,12 +61,11 @@ public class AuthResponse extends Message.Request
         }
     };
 
-    private final byte[] token;
+    private byte[] token;
 
     public AuthResponse(byte[] token)
     {
         super(Message.Type.AUTH_RESPONSE);
-        assert token != null;
         this.token = token;
     }
 
@@ -71,11 +74,11 @@ public class AuthResponse extends Message.Request
     {
         try
         {
-            IAuthenticator.SaslNegotiator negotiator = ((ServerConnection) connection).getSaslNegotiator();
-            byte[] challenge = negotiator.evaluateResponse(token);
-            if (negotiator.isComplete())
+            SaslAuthenticator authenticator = ((ServerConnection) connection).getAuthenticator();
+            byte[] challenge = authenticator.evaluateResponse(token == null ? new byte[0] : token);
+            if (authenticator.isComplete())
             {
-                AuthenticatedUser user = negotiator.getAuthenticatedUser();
+                AuthenticatedUser user = authenticator.getAuthenticatedUser();
                 queryState.getClientState().login(user);
                 // authentication is complete, send a ready message to the client
                 return new AuthSuccess(challenge);

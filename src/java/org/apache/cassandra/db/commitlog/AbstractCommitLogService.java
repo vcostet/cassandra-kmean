@@ -31,7 +31,7 @@ public abstract class AbstractCommitLogService
     // how often should we log syngs that lag behind our desired period
     private static final long LAG_REPORT_INTERVAL = TimeUnit.MINUTES.toMillis(5);
 
-    private Thread thread;
+    private final Thread thread;
     private volatile boolean shutdown = false;
 
     // all Allocations written before this time will be synced
@@ -45,10 +45,6 @@ public abstract class AbstractCommitLogService
     protected final WaitQueue syncComplete = new WaitQueue();
     private final Semaphore haveWork = new Semaphore(1);
 
-    final CommitLog commitLog;
-    private final String name;
-    private final long pollIntervalMillis;
-
     private static final Logger logger = LoggerFactory.getLogger(AbstractCommitLogService.class);
 
     /**
@@ -58,14 +54,6 @@ public abstract class AbstractCommitLogService
      * Subclasses may be notified when a sync finishes by using the syncComplete WaitQueue.
      */
     AbstractCommitLogService(final CommitLog commitLog, final String name, final long pollIntervalMillis)
-    {
-        this.commitLog = commitLog;
-        this.name = name;
-        this.pollIntervalMillis = pollIntervalMillis;
-    }
-
-    // Separated into individual method to ensure relevant objects are constructed before this is started.
-    void start()
     {
         if (pollIntervalMillis < 1)
             throw new IllegalArgumentException(String.format("Commit log flush interval must be positive: %dms", pollIntervalMillis));
@@ -180,29 +168,6 @@ public abstract class AbstractCommitLogService
     {
         shutdown = true;
         haveWork.release(1);
-    }
-
-    /**
-     * FOR TESTING ONLY
-     */
-    public void startUnsafe()
-    {
-        while (haveWork.availablePermits() < 1)
-            haveWork.release();
-
-        while (haveWork.availablePermits() > 1)
-        {
-            try
-            {
-                haveWork.acquire();
-            }
-            catch (InterruptedException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-        shutdown = false;
-        start();
     }
 
     public void awaitTermination() throws InterruptedException

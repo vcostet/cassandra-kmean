@@ -22,79 +22,115 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-public class SafeMemoryWriter extends DataOutputBuffer
+public class SafeMemoryWriter extends AbstractDataOutput implements DataOutputPlus
 {
-    private SafeMemory memory;
+    private ByteOrder order = ByteOrder.BIG_ENDIAN;
+    private SafeMemory buffer;
+    private long length;
 
     public SafeMemoryWriter(long initialCapacity)
     {
-        this(new SafeMemory(initialCapacity));
+        buffer = new SafeMemory(initialCapacity);
     }
 
-    private SafeMemoryWriter(SafeMemory memory)
+    public void write(byte[] buffer, int offset, int count)
     {
-        super(tailBuffer(memory).order(ByteOrder.BIG_ENDIAN));
-        this.memory = memory;
+        long newLength = ensureCapacity(count);
+        this.buffer.setBytes(this.length, buffer, offset, count);
+        this.length = newLength;
+    }
+
+    public void write(int oneByte)
+    {
+        long newLength = ensureCapacity(1);
+        buffer.setByte(length++, (byte) oneByte);
+        length = newLength;
+    }
+
+    public void writeShort(int val) throws IOException
+    {
+        if (order != ByteOrder.nativeOrder())
+            val = Short.reverseBytes((short) val);
+        long newLength = ensureCapacity(2);
+        buffer.setShort(length, (short) val);
+        length = newLength;
+    }
+
+    public void writeInt(int val)
+    {
+        if (order != ByteOrder.nativeOrder())
+            val = Integer.reverseBytes(val);
+        long newLength = ensureCapacity(4);
+        buffer.setInt(length, val);
+        length = newLength;
+    }
+
+    public void writeLong(long val)
+    {
+        if (order != ByteOrder.nativeOrder())
+            val = Long.reverseBytes(val);
+        long newLength = ensureCapacity(8);
+        buffer.setLong(length, val);
+        length = newLength;
+    }
+
+    public void write(ByteBuffer buffer)
+    {
+        long newLength = ensureCapacity(buffer.remaining());
+        this.buffer.setBytes(length, buffer);
+        length = newLength;
+    }
+
+    public void write(Memory memory)
+    {
+        long newLength = ensureCapacity(memory.size());
+        buffer.put(length, memory, 0, memory.size());
+        length = newLength;
+    }
+
+    private long ensureCapacity(long size)
+    {
+        long newLength = this.length + size;
+        if (newLength > buffer.size())
+            setCapacity(Math.max(newLength, buffer.size() + (buffer.size() / 2)));
+        return newLength;
     }
 
     public SafeMemory currentBuffer()
     {
-        return memory;
-    }
-
-    protected void reallocate(long newCapacity)
-    {
-        if (newCapacity != capacity())
-        {
-            long position = length();
-            ByteOrder order = buffer.order();
-
-            SafeMemory oldBuffer = memory;
-            memory = this.memory.copy(newCapacity);
-            buffer = tailBuffer(memory);
-
-            int newPosition = (int) (position - tailOffset(memory));
-            buffer.position(newPosition);
-            buffer.order(order);
-
-            oldBuffer.free();
-        }
+        return buffer;
     }
 
     public void setCapacity(long newCapacity)
     {
-        reallocate(newCapacity);
+        if (newCapacity != capacity())
+        {
+            SafeMemory oldBuffer = buffer;
+            buffer = this.buffer.copy(newCapacity);
+            oldBuffer.free();
+        }
     }
 
     public void close()
     {
-        memory.close();
+        buffer.close();
     }
 
     public long length()
     {
-        return tailOffset(memory) +  buffer.position();
+        return length;
     }
 
     public long capacity()
     {
-        return memory.size();
+        return buffer.size();
     }
 
-    @Override
-    public SafeMemoryWriter order(ByteOrder order)
+    // TODO: consider hoisting this into DataOutputPlus, since most implementations can copy with this gracefully
+    // this would simplify IndexSummary.IndexSummarySerializer.serialize()
+    public SafeMemoryWriter withByteOrder(ByteOrder order)
     {
-        super.order(order);
+        this.order = order;
         return this;
-    }
-
-    private static long tailOffset(Memory memory)
-    {
-        return Math.max(0, memory.size - Integer.MAX_VALUE);
-    }
-
-    private static ByteBuffer tailBuffer(Memory memory)
-    {
-        return memory.asByteBuffer(tailOffset(memory), (int) Math.min(memory.size, Integer.MAX_VALUE));
     }
 }

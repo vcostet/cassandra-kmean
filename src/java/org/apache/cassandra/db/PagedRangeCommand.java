@@ -129,8 +129,7 @@ public class PagedRangeCommand extends AbstractRangeCommand
             out.writeUTF(cmd.columnFamily);
             out.writeLong(cmd.timestamp);
 
-            MessagingService.validatePartitioner(cmd.keyRange);
-            AbstractBounds.rowPositionSerializer.serialize(cmd.keyRange, out, version);
+            AbstractBounds.serializer.serialize(cmd.keyRange, out, version);
 
             CFMetaData metadata = Schema.instance.getCFMetaData(cmd.keyspace, cmd.columnFamily);
 
@@ -159,8 +158,7 @@ public class PagedRangeCommand extends AbstractRangeCommand
             String columnFamily = in.readUTF();
             long timestamp = in.readLong();
 
-            AbstractBounds<RowPosition> keyRange =
-                    AbstractBounds.rowPositionSerializer.deserialize(in, MessagingService.globalPartitioner(), version);
+            AbstractBounds<RowPosition> keyRange = AbstractBounds.serializer.deserialize(in, version).toRowBounds();
 
             CFMetaData metadata = Schema.instance.getCFMetaData(keyspace, columnFamily);
 
@@ -191,7 +189,7 @@ public class PagedRangeCommand extends AbstractRangeCommand
             size += TypeSizes.NATIVE.sizeof(cmd.columnFamily);
             size += TypeSizes.NATIVE.sizeof(cmd.timestamp);
 
-            size += AbstractBounds.rowPositionSerializer.serializedSize(cmd.keyRange, version);
+            size += AbstractBounds.serializer.serializedSize(cmd.keyRange, version);
 
             CFMetaData metadata = Schema.instance.getCFMetaData(cmd.keyspace, cmd.columnFamily);
 

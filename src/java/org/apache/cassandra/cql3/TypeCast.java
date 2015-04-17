@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.cql3;
 
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
 public class TypeCast implements Term.Raw
@@ -33,11 +32,11 @@ public class TypeCast implements Term.Raw
 
     public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
     {
-        if (!term.testAssignment(keyspace, castedSpecOf(keyspace, receiver)).isAssignable())
+        if (!term.isAssignableTo(keyspace, castedSpecOf(keyspace, receiver)))
             throw new InvalidRequestException(String.format("Cannot cast value %s to type %s", term, type));
 
-        if (!testAssignment(keyspace, receiver).isAssignable())
-            throw new InvalidRequestException(String.format("Cannot assign value %s to %s of type %s", this, receiver.name, receiver.type.asCQL3Type()));
+        if (!isAssignableTo(keyspace, receiver))
+            throw new InvalidRequestException(String.format("Cannot assign value %s to %s of type %s", this, receiver, receiver.type.asCQL3Type()));
 
         return term.prepare(keyspace, receiver);
     }
@@ -47,15 +46,16 @@ public class TypeCast implements Term.Raw
         return new ColumnSpecification(receiver.ksName, receiver.cfName, new ColumnIdentifier(toString(), true), type.prepare(keyspace).getType());
     }
 
-    public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+    public boolean isAssignableTo(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
     {
-        AbstractType<?> castedType = type.prepare(keyspace).getType();
-        if (receiver.type.equals(castedType))
-            return AssignmentTestable.TestResult.EXACT_MATCH;
-        else if (receiver.type.isValueCompatibleWith(castedType))
-            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-        else
-            return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+        try
+        {
+            return receiver.type.isValueCompatibleWith(type.prepare(keyspace).getType());
+        }
+        catch (InvalidRequestException e)
+        {
+            throw new AssertionError();
+        }
     }
 
     @Override

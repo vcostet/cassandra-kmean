@@ -17,10 +17,10 @@
  */
 package org.apache.cassandra.tools;
 
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.cli.*;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -42,16 +42,16 @@ public class StandaloneUpgrader
     private static final String DEBUG_OPTION  = "debug";
     private static final String HELP_OPTION  = "help";
 
-    public static void main(String args[])
+    public static void main(String args[]) throws IOException
     {
         Options options = Options.parseArgs(args);
         try
         {
             // load keyspace descriptions.
-            Schema.instance.loadFromDisk(false);
+            DatabaseDescriptor.loadSchemas(false);
 
             if (Schema.instance.getCFMetaData(options.keyspace, options.cf) == null)
-                throw new IllegalArgumentException(String.format("Unknown keyspace/table %s.%s",
+                throw new IllegalArgumentException(String.format("Unknown keyspace/columnFamily %s.%s",
                                                                  options.keyspace,
                                                                  options.cf));
 
@@ -65,7 +65,7 @@ public class StandaloneUpgrader
             else
                 lister.includeBackups(false);
 
-            Collection<SSTableReader> readers = new ArrayList<>();
+            Collection<SSTableReader> readers = new ArrayList<SSTableReader>();
 
             // Upgrade sstables
             for (Map.Entry<Descriptor, Set<Component>> entry : lister.list().entrySet())
@@ -76,8 +76,8 @@ public class StandaloneUpgrader
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(entry.getKey(), components, cfs);
-                    if (sstable.descriptor.version.equals(DatabaseDescriptor.getSSTableFormat().info.getLatestVersion()))
+                    SSTableReader sstable = SSTableReader.openNoValidation(entry.getKey(), components, cfs.metadata);
+                    if (sstable.descriptor.version.equals(Descriptor.Version.CURRENT))
                         continue;
                     readers.add(sstable);
                 }

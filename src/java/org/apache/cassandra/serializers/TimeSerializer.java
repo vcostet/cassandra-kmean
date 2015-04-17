@@ -45,7 +45,7 @@ public class TimeSerializer implements TypeSerializer<Long>
         {
             try
             {
-                long result = Long.parseLong(source);
+                Long result = Long.parseLong(source);
                 if (result < 0 || result > TimeUnit.DAYS.toNanos(1))
                     throw new NumberFormatException("Input long out of bounds: " + source);
                 return result;
@@ -136,6 +136,9 @@ public class TimeSerializer implements TypeSerializer<Long>
         long second;
         long a_nanos = 0;
 
+        int firstColon = 0;
+        int secondColon = 0;
+        int period = 0;
         String formatError = "Timestamp format must be hh:mm:ss[.fffffffff]";
         String zeros = "000000000";
 
@@ -144,13 +147,13 @@ public class TimeSerializer implements TypeSerializer<Long>
         s = s.trim();
 
         // Parse the time
-        int firstColon = s.indexOf(':');
-        int secondColon = s.indexOf(':', firstColon+1);
+        firstColon = s.indexOf(':');
+        secondColon = s.indexOf(':', firstColon+1);
+        period = s.indexOf('.', secondColon+1);
 
         // Convert the time; default missing nanos
         if (firstColon > 0 && secondColon > 0 && secondColon < s.length() - 1)
         {
-            int period = s.indexOf('.', secondColon+1);
             hour = Integer.parseInt(s.substring(0, firstColon));
             if (hour < 0 || hour >= 24)
                 throw new IllegalArgumentException("Hour out of bounds.");

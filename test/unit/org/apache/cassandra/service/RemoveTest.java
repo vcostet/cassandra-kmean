@@ -39,6 +39,7 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sink.SinkManager;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
@@ -46,7 +47,7 @@ import static org.junit.Assert.assertTrue;
 
 public class RemoveTest
 {
-    static final IPartitioner partitioner = RandomPartitioner.instance;
+    static final IPartitioner partitioner = new RandomPartitioner();
     StorageService ss = StorageService.instance;
     TokenMetadata tmd = ss.getTokenMetadata();
     static IPartitioner oldPartitioner;
@@ -68,6 +69,7 @@ public class RemoveTest
     public static void tearDownClass()
     {
         StorageService.instance.setPartitionerUnsafe(oldPartitioner);
+        SchemaLoader.stopGossiper();
     }
 
     @Before
@@ -89,7 +91,7 @@ public class RemoveTest
     @After
     public void tearDown()
     {
-        MessagingService.instance().clearMessageSinks();
+        SinkManager.clear();
         MessagingService.instance().clearCallbacksUnsafe();
         MessagingService.instance().shutdown();
     }

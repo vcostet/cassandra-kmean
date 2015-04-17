@@ -28,7 +28,7 @@ import org.apache.cassandra.db.WriteType;
 /**
  * This class blocks for a quorum of responses _in the local datacenter only_ (CL.LOCAL_QUORUM).
  */
-public class DatacenterWriteResponseHandler<T> extends WriteResponseHandler<T>
+public class DatacenterWriteResponseHandler extends WriteResponseHandler
 {
     public DatacenterWriteResponseHandler(Collection<InetAddress> naturalEndpoints,
                                           Collection<InetAddress> pendingEndpoints,
@@ -42,9 +42,9 @@ public class DatacenterWriteResponseHandler<T> extends WriteResponseHandler<T>
     }
 
     @Override
-    public void response(MessageIn<T> message)
+    public void response(MessageIn message)
     {
-        if (message == null || waitingFor(message.from))
+        if (message == null || consistencyLevel.isLocal(message.from))
             super.response(message);
     }
 
@@ -54,11 +54,5 @@ public class DatacenterWriteResponseHandler<T> extends WriteResponseHandler<T>
         // during bootstrap, include pending endpoints (only local here) in the count
         // or we may fail the consistency level guarantees (see #833, #8058)
         return consistencyLevel.blockFor(keyspace) + consistencyLevel.countLocalEndpoints(pendingEndpoints);
-    }
-
-    @Override
-    protected boolean waitingFor(InetAddress from)
-    {
-        return consistencyLevel.isLocal(from);
     }
 }

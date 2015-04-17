@@ -44,28 +44,21 @@ public abstract class ParsedStatement
     {
         public final CQLStatement statement;
         public final List<ColumnSpecification> boundNames;
-        public final Short[] partitionKeyBindIndexes;
 
-        protected Prepared(CQLStatement statement, List<ColumnSpecification> boundNames, Short[] partitionKeyBindIndexes)
+        public Prepared(CQLStatement statement, List<ColumnSpecification> boundNames)
         {
             this.statement = statement;
             this.boundNames = boundNames;
-            this.partitionKeyBindIndexes = partitionKeyBindIndexes;
         }
 
-        public Prepared(CQLStatement statement, VariableSpecifications names, Short[] partitionKeyBindIndexes)
+        public Prepared(CQLStatement statement, VariableSpecifications names)
         {
-            this(statement, names.getSpecifications(), partitionKeyBindIndexes);
+            this(statement, names.getSpecifications());
         }
 
         public Prepared(CQLStatement statement)
         {
-            this(statement, Collections.<ColumnSpecification>emptyList(), null);
+            this(statement, Collections.<ColumnSpecification>emptyList());
         }
-    }
-
-    public boolean usesFunction(String ksName, String functionName)
-    {
-        return false;
     }
 }

@@ -26,6 +26,7 @@ import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
+import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.thrift.CqlPreparedResult;
 import org.apache.cassandra.thrift.CqlResult;
@@ -238,11 +239,11 @@ public abstract class ResultMessage extends Message.Response
             public ResultMessage decode(ByteBuf body, int version)
             {
                 MD5Digest id = MD5Digest.wrap(CBUtil.readBytes(body));
-                ResultSet.PreparedMetadata metadata = ResultSet.PreparedMetadata.codec.decode(body, version);
+                ResultSet.Metadata metadata = ResultSet.Metadata.codec.decode(body, version);
 
-                ResultSet.ResultMetadata resultMetadata = ResultSet.ResultMetadata.EMPTY;
+                ResultSet.Metadata resultMetadata = ResultSet.Metadata.EMPTY;
                 if (version > 1)
-                    resultMetadata = ResultSet.ResultMetadata.codec.decode(body, version);
+                    resultMetadata = ResultSet.Metadata.codec.decode(body, version);
 
                 return new Prepared(id, -1, metadata, resultMetadata);
             }
@@ -254,9 +255,9 @@ public abstract class ResultMessage extends Message.Response
                 assert prepared.statementId != null;
 
                 CBUtil.writeBytes(prepared.statementId.bytes, dest);
-                ResultSet.PreparedMetadata.codec.encode(prepared.metadata, dest, version);
+                ResultSet.Metadata.codec.encode(prepared.metadata, dest, version);
                 if (version > 1)
-                    ResultSet.ResultMetadata.codec.encode(prepared.resultMetadata, dest, version);
+                    ResultSet.Metadata.codec.encode(prepared.resultMetadata, dest, version);
             }
 
             public int encodedSize(ResultMessage msg, int version)
@@ -267,9 +268,9 @@ public abstract class ResultMessage extends Message.Response
 
                 int size = 0;
                 size += CBUtil.sizeOfBytes(prepared.statementId.bytes);
-                size += ResultSet.PreparedMetadata.codec.encodedSize(prepared.metadata, version);
+                size += ResultSet.Metadata.codec.encodedSize(prepared.metadata, version);
                 if (version > 1)
-                    size += ResultSet.ResultMetadata.codec.encodedSize(prepared.resultMetadata, version);
+                    size += ResultSet.Metadata.codec.encodedSize(prepared.resultMetadata, version);
                 return size;
             }
         };
@@ -277,25 +278,25 @@ public abstract class ResultMessage extends Message.Response
         public final MD5Digest statementId;
 
         /** Describes the variables to be bound in the prepared statement */
-        public final ResultSet.PreparedMetadata metadata;
+        public final ResultSet.Metadata metadata;
 
         /** Describes the results of executing this prepared statement */
-        public final ResultSet.ResultMetadata resultMetadata;
+        public final ResultSet.Metadata resultMetadata;
 
         // statement id for CQL-over-thrift compatibility. The binary protocol ignore that.
         private final int thriftStatementId;
 
         public Prepared(MD5Digest statementId, ParsedStatement.Prepared prepared)
         {
-            this(statementId, -1, new ResultSet.PreparedMetadata(prepared.boundNames, prepared.partitionKeyBindIndexes), extractResultMetadata(prepared.statement));
+            this(statementId, -1, new ResultSet.Metadata(prepared.boundNames), extractResultMetadata(prepared.statement));
         }
 
         public static Prepared forThrift(int statementId, List<ColumnSpecification> names)
         {
-            return new Prepared(null, statementId, new ResultSet.PreparedMetadata(names, null), ResultSet.ResultMetadata.EMPTY);
+            return new Prepared(null, statementId, new ResultSet.Metadata(names), ResultSet.Metadata.EMPTY);
         }
 
-        private Prepared(MD5Digest statementId, int thriftStatementId, ResultSet.PreparedMetadata metadata, ResultSet.ResultMetadata resultMetadata)
+        private Prepared(MD5Digest statementId, int thriftStatementId, ResultSet.Metadata metadata, ResultSet.Metadata resultMetadata)
         {
             super(Kind.PREPARED);
             this.statementId = statementId;
@@ -304,10 +305,10 @@ public abstract class ResultMessage extends Message.Response
             this.resultMetadata = resultMetadata;
         }
 
-        private static ResultSet.ResultMetadata extractResultMetadata(CQLStatement statement)
+        private static ResultSet.Metadata extractResultMetadata(CQLStatement statement)
         {
             if (!(statement instanceof SelectStatement))
-                return ResultSet.ResultMetadata.EMPTY;
+                return ResultSet.Metadata.EMPTY;
 
             return ((SelectStatement)statement).getResultMetadata();
         }

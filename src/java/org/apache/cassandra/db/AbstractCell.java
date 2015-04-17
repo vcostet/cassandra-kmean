@@ -30,7 +30,7 @@ import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -39,7 +39,7 @@ public abstract class AbstractCell implements Cell
     public static Iterator<OnDiskAtom> onDiskIterator(final DataInput in,
                                                       final ColumnSerializer.Flag flag,
                                                       final int expireBefore,
-                                                      final Version version,
+                                                      final Descriptor.Version version,
                                                       final CellNameType type)
     {
         return new AbstractIterator<OnDiskAtom>()

@@ -30,7 +30,6 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
  *
  * <p>The typical usage is something like:
  * <pre>
- * {@code
      public final class ExampleShared
      {
         final OpOrder order = new OpOrder();
@@ -74,7 +73,6 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
             }
         }
     }
- * }
  * </pre>
  */
 public class OpOrder

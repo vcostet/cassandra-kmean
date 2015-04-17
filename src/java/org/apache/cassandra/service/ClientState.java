@@ -17,14 +17,13 @@
  */
 package org.apache.cassandra.service;
 
-import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,13 +32,13 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.schema.LegacySchemaTables;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.thrift.ThriftValidation;
-import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.SemanticVersion;
@@ -54,33 +53,23 @@ public class ClientState
 
     private static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
     private static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
-    private static final Set<String> ALTERABLE_SYSTEM_KEYSPACES = new HashSet<>();
-    private static final Set<IResource> DROPPABLE_SYSTEM_TABLES = new HashSet<>();
+
     static
     {
         // We want these system cfs to be always readable to authenticated users since many tools rely on them
         // (nodetool, cqlsh, bulkloader, etc.)
-        for (String cf : Iterables.concat(Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.PEERS), LegacySchemaTables.ALL))
-            READABLE_SYSTEM_RESOURCES.add(DataResource.table(SystemKeyspace.NAME, cf));
+        for (String cf : Iterables.concat(Arrays.asList(SystemKeyspace.LOCAL_CF, SystemKeyspace.PEERS_CF), SystemKeyspace.allSchemaCfs))
+            READABLE_SYSTEM_RESOURCES.add(DataResource.columnFamily(Keyspace.SYSTEM_KS, cf));
 
         PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthenticator().protectedResources());
         PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthorizer().protectedResources());
-        PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getRoleManager().protectedResources());
-
-        // allow users with sufficient privileges to alter KS level options on AUTH_KS and
-        // TRACING_KS, and also to drop legacy tables (users, credentials, permissions) from
-        // AUTH_KS
-        ALTERABLE_SYSTEM_KEYSPACES.add(AuthKeyspace.NAME);
-        ALTERABLE_SYSTEM_KEYSPACES.add(TraceKeyspace.NAME);
-        DROPPABLE_SYSTEM_TABLES.add(DataResource.table(AuthKeyspace.NAME, PasswordAuthenticator.LEGACY_CREDENTIALS_TABLE));
-        DROPPABLE_SYSTEM_TABLES.add(DataResource.table(AuthKeyspace.NAME, CassandraRoleManager.LEGACY_USERS_TABLE));
-        DROPPABLE_SYSTEM_TABLES.add(DataResource.table(AuthKeyspace.NAME, CassandraAuthorizer.USER_PERMISSIONS));
     }
 
     // Current user for the session
     private volatile AuthenticatedUser user;
     private volatile String keyspace;
 
+    private SemanticVersion cqlVersion;
     private static final QueryHandler cqlQueryHandler;
     static
     {
@@ -90,7 +79,7 @@ public class ClientState
         {
             try
             {
-                handler = FBUtilities.construct(customHandlerClass, "QueryHandler");
+                handler = (QueryHandler)FBUtilities.construct(customHandlerClass, "QueryHandler");
                 logger.info("Using {} as query handler for native protocol queries (as requested with -Dcassandra.custom_query_handler_class)", customHandlerClass);
             }
             catch (Exception e)
@@ -107,7 +96,7 @@ public class ClientState
     public final boolean isInternal;
 
     // The remote address of the client - null for internal clients.
-    private final InetSocketAddress remoteAddress;
+    private final SocketAddress remoteAddress;
 
     // The biggest timestamp that was returned by getTimestamp/assigned to a query
     private final AtomicLong lastTimestampMicros = new AtomicLong(0);
@@ -121,7 +110,7 @@ public class ClientState
         this.remoteAddress = null;
     }
 
-    protected ClientState(InetSocketAddress remoteAddress)
+    protected ClientState(SocketAddress remoteAddress)
     {
         this.isInternal = false;
         this.remoteAddress = remoteAddress;
@@ -142,7 +131,7 @@ public class ClientState
      */
     public static ClientState forExternalCalls(SocketAddress remoteAddress)
     {
-        return new ClientState((InetSocketAddress)remoteAddress);
+        return new ClientState(remoteAddress);
     }
 
     /**
@@ -182,7 +171,7 @@ public class ClientState
         return cqlQueryHandler;
     }
 
-    public InetSocketAddress getRemoteAddress()
+    public SocketAddress getRemoteAddress()
     {
         return remoteAddress;
     }
@@ -213,13 +202,10 @@ public class ClientState
      */
     public void login(AuthenticatedUser user) throws AuthenticationException
     {
-        // Login privilege is not inherited via granted roles, so just
-        // verify that the role with the credentials that were actually
-        // supplied has it
-        if (user.isAnonymous() || DatabaseDescriptor.getRoleManager().canLogin(user.getPrimaryRole()))
-            this.user = user;
-        else
-            throw new AuthenticationException(String.format("%s is not permitted to log in", user.getName()));
+        if (!user.isAnonymous() && !Auth.isExistingUser(user.getName()))
+           throw new AuthenticationException(String.format("User %s doesn't exist - create it with CREATE USER query first",
+                                                           user.getName()));
+        this.user = user;
     }
 
     public void hasAllKeyspacesAccess(Permission perm) throws UnauthorizedException
@@ -239,7 +225,7 @@ public class ClientState
     throws UnauthorizedException, InvalidRequestException
     {
         ThriftValidation.validateColumnFamily(keyspace, columnFamily);
-        hasAccess(keyspace, perm, DataResource.table(keyspace, columnFamily));
+        hasAccess(keyspace, perm, DataResource.columnFamily(keyspace, columnFamily));
     }
 
     private void hasAccess(String keyspace, Permission perm, DataResource resource)
@@ -250,10 +236,10 @@ public class ClientState
             return;
         validateLogin();
         preventSystemKSSchemaModification(keyspace, resource, perm);
-        if ((perm == Permission.SELECT) && READABLE_SYSTEM_RESOURCES.contains(resource))
+        if (perm.equals(Permission.SELECT) && READABLE_SYSTEM_RESOURCES.contains(resource))
             return;
         if (PROTECTED_AUTH_RESOURCES.contains(resource))
-            if ((perm == Permission.CREATE) || (perm == Permission.ALTER) || (perm == Permission.DROP))
+            if (perm.equals(Permission.CREATE) || perm.equals(Permission.ALTER) || perm.equals(Permission.DROP))
                 throw new UnauthorizedException(String.format("%s schema is protected", resource));
         ensureHasPermission(perm, resource);
     }
@@ -273,22 +259,17 @@ public class ClientState
     private void preventSystemKSSchemaModification(String keyspace, DataResource resource, Permission perm) throws UnauthorizedException
     {
         // we only care about schema modification.
-        if (!((perm == Permission.ALTER) || (perm == Permission.DROP) || (perm == Permission.CREATE)))
+        if (!(perm.equals(Permission.ALTER) || perm.equals(Permission.DROP) || perm.equals(Permission.CREATE)))
             return;
 
         // prevent system keyspace modification
-        if (SystemKeyspace.NAME.equalsIgnoreCase(keyspace))
+        if (Keyspace.SYSTEM_KS.equalsIgnoreCase(keyspace))
             throw new UnauthorizedException(keyspace + " keyspace is not user-modifiable.");
 
-        // allow users with sufficient privileges to alter KS level options on AUTH_KS and
-        // TRACING_KS, and also to drop legacy tables (users, credentials, permissions) from
-        // AUTH_KS
-        if (ALTERABLE_SYSTEM_KEYSPACES.contains(resource.getKeyspace().toLowerCase())
-           && ((perm == Permission.ALTER && !resource.isKeyspaceLevel())
-               || (perm == Permission.DROP && !DROPPABLE_SYSTEM_TABLES.contains(resource))))
-        {
+        // we want to allow altering AUTH_KS and TRACING_KS.
+        Set<String> allowAlter = Sets.newHashSet(Auth.AUTH_KS, Tracing.TRACE_KS);
+        if (allowAlter.contains(keyspace.toLowerCase()) && !(resource.isKeyspaceLevel() && perm.equals(Permission.ALTER)))
             throw new UnauthorizedException(String.format("Cannot %s %s", perm, resource));
-        }
     }
 
     public void validateLogin() throws UnauthorizedException
@@ -316,18 +297,58 @@ public class ClientState
             throw new InvalidRequestException("You have not set a keyspace for this session");
     }
 
+    public void setCQLVersion(String str) throws InvalidRequestException
+    {
+        SemanticVersion version;
+        try
+        {
+            version = new SemanticVersion(str);
+        }
+        catch (IllegalArgumentException e)
+        {
+            throw new InvalidRequestException(e.getMessage());
+        }
+
+        SemanticVersion cql = org.apache.cassandra.cql.QueryProcessor.CQL_VERSION;
+        SemanticVersion cql3 = org.apache.cassandra.cql3.QueryProcessor.CQL_VERSION;
+
+        // We've made some backward incompatible changes between CQL3 beta1 and the final.
+        // It's ok because it was a beta, but it still mean we don't support 3.0.0-beta1 so reject it.
+        SemanticVersion cql3Beta = new SemanticVersion("3.0.0-beta1");
+        if (version.equals(cql3Beta))
+            throw new InvalidRequestException(String.format("There has been a few syntax breaking changes between 3.0.0-beta1 and 3.0.0 "
+                                                           + "(mainly the syntax for options of CREATE KEYSPACE and CREATE TABLE). 3.0.0-beta1 "
+                                                           + " is not supported; please upgrade to 3.0.0"));
+        if (version.isSupportedBy(cql))
+            cqlVersion = cql;
+        else if (version.isSupportedBy(cql3))
+            cqlVersion = cql3;
+        else
+            throw new InvalidRequestException(String.format("Provided version %s is not supported by this server (supported: %s)",
+                                                            version,
+                                                            StringUtils.join(getCQLSupportedVersion(), ", ")));
+    }
+
     public AuthenticatedUser getUser()
     {
         return user;
     }
 
+    public SemanticVersion getCQLVersion()
+    {
+        return cqlVersion;
+    }
+
     public static SemanticVersion[] getCQLSupportedVersion()
     {
-        return new SemanticVersion[]{ QueryProcessor.CQL_VERSION };
+        SemanticVersion cql = org.apache.cassandra.cql.QueryProcessor.CQL_VERSION;
+        SemanticVersion cql3 = org.apache.cassandra.cql3.QueryProcessor.CQL_VERSION;
+
+        return new SemanticVersion[]{ cql, cql3 };
     }
 
     private Set<Permission> authorize(IResource resource)
     {
-        return user.getPermissions(resource);
+        return Auth.getPermissions(user, resource);
     }
 }

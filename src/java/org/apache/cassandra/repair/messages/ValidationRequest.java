@@ -42,14 +42,6 @@ public class ValidationRequest extends RepairMessage
     }
 
     @Override
-    public String toString()
-    {
-        return "ValidationRequest{" +
-                "gcBefore=" + gcBefore +
-                "} " + super.toString();
-    }
-
-    @Override
     public boolean equals(Object o)
     {
         if (this == o) return true;

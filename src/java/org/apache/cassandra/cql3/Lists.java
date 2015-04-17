@@ -27,12 +27,10 @@ import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.db.ColumnFamily;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.Composite;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
-import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -100,22 +98,22 @@ public abstract class Lists
             ColumnSpecification valueSpec = Lists.valueSpecOf(receiver);
             for (Term.Raw rt : elements)
             {
-                if (!rt.testAssignment(keyspace, valueSpec).isAssignable())
+                if (!rt.isAssignableTo(keyspace, valueSpec))
                     throw new InvalidRequestException(String.format("Invalid list literal for %s: value %s is not of type %s", receiver.name, rt, valueSpec.type.asCQL3Type()));
             }
         }
 
-        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
-            if (!(receiver.type instanceof ListType))
-                return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
-
-            // If there is no elements, we can't say it's an exact match (an empty list if fundamentally polymorphic).
-            if (elements.isEmpty())
-                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-
-            ColumnSpecification valueSpec = Lists.valueSpecOf(receiver);
-            return AssignmentTestable.TestResult.testAll(keyspace, valueSpec, elements);
+            try
+            {
+                validateAssignableTo(keyspace, receiver);
+                return true;
+            }
+            catch (InvalidRequestException e)
+            {
+                return false;
+            }
         }
 
         @Override
@@ -125,7 +123,7 @@ public abstract class Lists
         }
     }
 
-    public static class Value extends Term.MultiItemTerminal
+    public static class Value extends Term.MultiItemTerminal implements Term.CollectionTerminal
     {
         public final List<ByteBuffer> elements;
 
@@ -153,7 +151,12 @@ public abstract class Lists
             }
         }
 
-        public ByteBuffer get(int protocolVersion)
+        public ByteBuffer get(QueryOptions options)
+        {
+            return getWithProtocolVersion(options.getProtocolVersion());
+        }
+
+        public ByteBuffer getWithProtocolVersion(int protocolVersion)
         {
             return CollectionSerializer.pack(elements, elements.size(), protocolVersion);
         }
@@ -378,6 +381,7 @@ public abstract class Lists
         static void doAppend(Term t, ColumnFamily cf, Composite prefix, ColumnDefinition column, UpdateParameters params) throws InvalidRequestException
         {
             Term.Terminal value = t.bind(params.options);
+            Lists.Value listValue = (Lists.Value)value;
             if (column.type.isMultiCell())
             {
                 // If we append null, do nothing. Note that for Setter, we've
@@ -385,10 +389,11 @@ public abstract class Lists
                 if (value == null)
                     return;
 
-                for (ByteBuffer buffer : ((Value) value).elements)
+                List<ByteBuffer> toAdd = listValue.elements;
+                for (int i = 0; i < toAdd.size(); i++)
                 {
                     ByteBuffer uuid = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes());
-                    cf.addColumn(params.makeColumn(cf.getComparator().create(prefix, column, uuid), buffer));
+                    cf.addColumn(params.makeColumn(cf.getComparator().create(prefix, column, uuid), toAdd.get(i)));
                 }
             }
             else
@@ -398,7 +403,7 @@ public abstract class Lists
                 if (value == null)
                     cf.addAtom(params.makeTombstone(name));
                 else
-                    cf.addColumn(params.makeColumn(name, value.get(Server.CURRENT_VERSION)));
+                    cf.addColumn(params.makeColumn(name, listValue.getWithProtocolVersion(Server.CURRENT_VERSION)));
             }
         }
     }
@@ -417,9 +422,10 @@ public abstract class Lists
             if (value == null)
                 return;
 
+            assert value instanceof Lists.Value;
             long time = PrecisionTime.REFERENCE_TIME - (System.currentTimeMillis() - PrecisionTime.REFERENCE_TIME);
 
-            List<ByteBuffer> toAdd = ((Value) value).elements;
+            List<ByteBuffer> toAdd = ((Lists.Value)value).elements;
             for (int i = toAdd.size() - 1; i >= 0; i--)
             {
                 PrecisionTime pt = PrecisionTime.getNext(time);
@@ -457,11 +463,13 @@ public abstract class Lists
             if (value == null)
                 return;
 
+            assert value instanceof Lists.Value;
+
             // Note: below, we will call 'contains' on this toDiscard list for each element of existingList.
             // Meaning that if toDiscard is big, converting it to a HashSet might be more efficient. However,
             // the read-before-write this operation requires limits its usefulness on big lists, so in practice
             // toDiscard will be small and keeping a list will be more efficient.
-            List<ByteBuffer> toDiscard = ((Value) value).elements;
+            List<ByteBuffer> toDiscard = ((Lists.Value)value).elements;
             for (Cell cell : existingList)
             {
                 if (toDiscard.contains(cell.value()))
@@ -491,7 +499,7 @@ public abstract class Lists
                 throw new InvalidRequestException("Invalid null value for list index");
 
             List<Cell> existingList = params.getPrefetchedList(rowKey, column.name);
-            int idx = ByteBufferUtil.toInt(index.get(params.options.getProtocolVersion()));
+            int idx = ByteBufferUtil.toInt(index.get(params.options));
             if (existingList == null)
                 throw new InvalidRequestException("Attempted to delete an element from a list which is null");
             if (idx < 0 || idx >= existingList.size())

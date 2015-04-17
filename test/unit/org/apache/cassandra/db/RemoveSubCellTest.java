@@ -21,17 +21,12 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.db.composites.*;
 import org.apache.cassandra.db.filter.QueryFilter;
-import org.apache.cassandra.db.marshal.LongType;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.SimpleStrategy;
 
 import static org.apache.cassandra.Util.getBytes;
 import org.apache.cassandra.Util;
@@ -41,40 +36,27 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 
-public class RemoveSubCellTest
+public class RemoveSubCellTest extends SchemaLoader
 {
-    private static final String KEYSPACE1 = "RemoveSubCellTest";
-    private static final String CF_SUPER1 = "Super1";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.superCFMD(KEYSPACE1, CF_SUPER1, LongType.instance));
-    }
-
     @Test
     public void testRemoveSubColumn()
     {
-        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        Keyspace keyspace = Keyspace.open("Keyspace1");
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Super1");
         Mutation rm;
         DecoratedKey dk = Util.dk("key1");
 
         // add data
-        rm = new Mutation(KEYSPACE1, dk.getKey());
+        rm = new Mutation("Keyspace1", dk.getKey());
         Util.addMutation(rm, "Super1", "SC1", 1, "asdf", 0);
-        rm.applyUnsafe();
+        rm.apply();
         store.forceBlockingFlush();
 
         CellName cname = CellNames.compositeDense(ByteBufferUtil.bytes("SC1"), getBytes(1L));
         // remove
-        rm = new Mutation(KEYSPACE1, dk.getKey());
+        rm = new Mutation("Keyspace1", dk.getKey());
         rm.delete("Super1", cname, 1);
-        rm.applyUnsafe();
+        rm.apply();
 
         ColumnFamily retrieved = store.getColumnFamily(QueryFilter.getIdentityFilter(dk, "Super1", System.currentTimeMillis()));
         assertFalse(retrieved.getColumn(cname).isLive());
@@ -84,23 +66,23 @@ public class RemoveSubCellTest
     @Test
     public void testRemoveSubColumnAndContainer()
     {
-        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        Keyspace keyspace = Keyspace.open("Keyspace1");
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Super1");
         Mutation rm;
         DecoratedKey dk = Util.dk("key2");
 
         // add data
-        rm = new Mutation(KEYSPACE1, dk.getKey());
+        rm = new Mutation("Keyspace1", dk.getKey());
         Util.addMutation(rm, "Super1", "SC1", 1, "asdf", 0);
-        rm.applyUnsafe();
+        rm.apply();
         store.forceBlockingFlush();
 
         // remove the SC
         ByteBuffer scName = ByteBufferUtil.bytes("SC1");
         CellName cname = CellNames.compositeDense(scName, getBytes(1L));
-        rm = new Mutation(KEYSPACE1, dk.getKey());
+        rm = new Mutation("Keyspace1", dk.getKey());
         rm.deleteRange("Super1", SuperColumns.startOf(scName), SuperColumns.endOf(scName), 1);
-        rm.applyUnsafe();
+        rm.apply();
 
         // Mark current time and make sure the next insert happens at least
         // one second after the previous one (since gc resolution is the second)
@@ -108,9 +90,9 @@ public class RemoveSubCellTest
         Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
 
         // remove the column itself
-        rm = new Mutation(KEYSPACE1, dk.getKey());
+        rm = new Mutation("Keyspace1", dk.getKey());
         rm.delete("Super1", cname, 2);
-        rm.applyUnsafe();
+        rm.apply();
 
         ColumnFamily retrieved = store.getColumnFamily(filter);
         assertFalse(retrieved.getColumn(cname).isLive());

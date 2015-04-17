@@ -20,14 +20,10 @@ package org.apache.cassandra.db.compaction;
 import java.io.IOException;
 import java.util.*;
 
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.collect.*;
 import com.google.common.primitives.Doubles;
-
-import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +32,8 @@ import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.SSTableReader;
 
 public class LeveledCompactionStrategy extends AbstractCompactionStrategy
 {
@@ -91,7 +89,14 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
     {
         if (!isEnabled())
             return null;
+        Collection<AbstractCompactionTask> tasks = getMaximalTask(gcBefore);
+        if (tasks == null || tasks.size() == 0)
+            return null;
+        return tasks.iterator().next();
+    }
 
+    public Collection<AbstractCompactionTask> getMaximalTask(int gcBefore)
+    {
         while (true)
         {
             OperationType op;
@@ -117,27 +122,13 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
 
             if (cfs.getDataTracker().markCompacting(candidate.sstables))
             {
-                LeveledCompactionTask newTask = new LeveledCompactionTask(cfs, candidate.sstables, candidate.level, gcBefore, candidate.maxSSTableBytes, false);
+                LeveledCompactionTask newTask = new LeveledCompactionTask(cfs, candidate.sstables, candidate.level, gcBefore, candidate.maxSSTableBytes);
                 newTask.setCompactionType(op);
-                return newTask;
+                return Arrays.<AbstractCompactionTask>asList(newTask);
             }
         }
     }
 
-    public synchronized Collection<AbstractCompactionTask> getMaximalTask(int gcBefore, boolean splitOutput)
-    {
-        Iterable<SSTableReader> sstables = manifest.getAllSSTables();
-
-        Iterable<SSTableReader> filteredSSTables = filterSuspectSSTables(sstables);
-        if (Iterables.isEmpty(sstables))
-            return null;
-        if (!cfs.getDataTracker().markCompacting(filteredSSTables))
-            return null;
-        return Arrays.<AbstractCompactionTask>asList(new LeveledCompactionTask(cfs, filteredSSTables, 0, gcBefore, getMaxSSTableBytes(), true));
-
-    }
-
-    @Override
     public AbstractCompactionTask getUserDefinedTask(Collection<SSTableReader> sstables, int gcBefore)
     {
         throw new UnsupportedOperationException("LevelDB compaction strategy does not allow user-specified compactions");
@@ -156,51 +147,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
             if (level != sstable.getSSTableLevel())
                 level = 0;
         }
-        return new LeveledCompactionTask(cfs, sstables, level, gcBefore, maxSSTableBytes, false);
-    }
-
-    /**
-     * Leveled compaction strategy has guarantees on the data contained within each level so we
-     * have to make sure we only create groups of SSTables with members from the same level.
-     * This way we won't end up creating invalid sstables during anti-compaction.
-     * @param ssTablesToGroup
-     * @return Groups of sstables from the same level
-     */
-    @Override
-    public Collection<Collection<SSTableReader>> groupSSTablesForAntiCompaction(Collection<SSTableReader> ssTablesToGroup)
-    {
-        int groupSize = 2;
-        Map<Integer, Collection<SSTableReader>> sstablesByLevel = new HashMap<>();
-        for (SSTableReader sstable : ssTablesToGroup)
-        {
-            Integer level = sstable.getSSTableLevel();
-            if (!sstablesByLevel.containsKey(level))
-            {
-                sstablesByLevel.put(level, new ArrayList<SSTableReader>());
-            }
-            sstablesByLevel.get(level).add(sstable);
-        }
-
-        Collection<Collection<SSTableReader>> groupedSSTables = new ArrayList<>();
-
-        for (Collection<SSTableReader> levelOfSSTables : sstablesByLevel.values())
-        {
-            Collection<SSTableReader> currGroup = new ArrayList<>();
-            for (SSTableReader sstable : levelOfSSTables)
-            {
-                currGroup.add(sstable);
-                if (currGroup.size() == groupSize)
-                {
-                    groupedSSTables.add(currGroup);
-                    currGroup = new ArrayList<>();
-                }
-            }
-
-            if (currGroup.size() != 0)
-                groupedSSTables.add(currGroup);
-        }
-        return groupedSSTables;
-
+        return new LeveledCompactionTask(cfs, sstables, level, gcBefore, maxSSTableBytes);
     }
 
     public int getEstimatedRemainingTasks()
@@ -294,7 +241,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
             this.range = range;
 
             // add only sstables that intersect our range, and estimate how much data that involves
-            this.sstables = new ArrayList<>(sstables.size());
+            this.sstables = new ArrayList<SSTableReader>(sstables.size());
             long length = 0;
             for (SSTableReader sstable : sstables)
             {
@@ -317,10 +264,10 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
 
         public static List<SSTableReader> intersecting(Collection<SSTableReader> sstables, Range<Token> range)
         {
-            ArrayList<SSTableReader> filtered = new ArrayList<>();
+            ArrayList<SSTableReader> filtered = new ArrayList<SSTableReader>();
             for (SSTableReader sstable : sstables)
             {
-                Range<Token> sstableRange = new Range<>(sstable.first.getToken(), sstable.last.getToken());
+                Range<Token> sstableRange = new Range<Token>(sstable.first.getToken(), sstable.last.getToken(), sstable.partitioner);
                 if (range == null || sstableRange.intersects(range))
                     filtered.add(sstable);
             }

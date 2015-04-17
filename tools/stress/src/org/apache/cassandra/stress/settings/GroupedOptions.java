@@ -87,7 +87,7 @@ public abstract class GroupedOptions
             }
             firstRow = false;
 
-            StringBuilder sb = new StringBuilder("Usage: ").append(command);
+            StringBuilder sb = new StringBuilder("Usage: " + command);
             for (Option option : grouping.options())
             {
                 sb.append(" ");

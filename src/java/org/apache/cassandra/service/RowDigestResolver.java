@@ -27,9 +27,9 @@ import org.apache.cassandra.net.MessageIn;
 
 public class RowDigestResolver extends AbstractRowResolver
 {
-    public RowDigestResolver(String keyspaceName, ByteBuffer key, int maxResponseCount)
+    public RowDigestResolver(String keyspaceName, ByteBuffer key)
     {
-        super(key, keyspaceName, maxResponseCount);
+        super(key, keyspaceName);
     }
 
     /**

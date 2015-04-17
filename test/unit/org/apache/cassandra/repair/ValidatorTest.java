@@ -22,13 +22,10 @@ import java.net.InetAddress;
 import java.security.MessageDigest;
 import java.util.UUID;
 
-import org.apache.cassandra.io.util.SequentialWriter;
 import org.junit.After;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -39,11 +36,12 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ColumnStats;
-import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.IMessageSink;
+import org.apache.cassandra.sink.IMessageSink;
+import org.apache.cassandra.sink.SinkManager;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.ValidationComplete;
 import org.apache.cassandra.service.StorageService;
@@ -53,26 +51,16 @@ import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static org.junit.Assert.*;
 
-public class ValidatorTest
+public class ValidatorTest extends SchemaLoader
 {
-    private static final String keyspace = "ValidatorTest";
-    private static final String columnFamily = "Standard1";
+    private final String keyspace = "Keyspace1";
+    private final String columnFamily = "Standard1";
     private final IPartitioner partitioner = StorageService.getPartitioner();
-
-    @BeforeClass
-    public static void defineSchema() throws Exception
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(keyspace,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(keyspace, columnFamily));
-    }
 
     @After
     public void tearDown()
     {
-        MessagingService.instance().clearMessageSinks();
+        SinkManager.clear();
     }
 
     @Test
@@ -82,10 +70,10 @@ public class ValidatorTest
         final RepairJobDesc desc = new RepairJobDesc(UUID.randomUUID(), UUID.randomUUID(), keyspace, columnFamily, range);
 
         final SimpleCondition lock = new SimpleCondition();
-        MessagingService.instance().addMessageSink(new IMessageSink()
+        SinkManager.add(new IMessageSink()
         {
             @SuppressWarnings("unchecked")
-            public boolean allowOutgoingMessage(MessageOut message, int id, InetAddress to)
+            public MessageOut handleMessage(MessageOut message, int id, InetAddress to)
             {
                 try
                 {
@@ -94,20 +82,20 @@ public class ValidatorTest
                         RepairMessage m = (RepairMessage) message.payload;
                         assertEquals(RepairMessage.Type.VALIDATION_COMPLETE, m.messageType);
                         assertEquals(desc, m.desc);
-                        assertTrue(((ValidationComplete) m).success);
-                        assertNotNull(((ValidationComplete) m).tree);
+                        assertTrue(((ValidationComplete)m).success);
+                        assertNotNull(((ValidationComplete)m).tree);
                     }
                 }
                 finally
                 {
                     lock.signalAll();
                 }
-                return false;
+                return null;
             }
 
-            public boolean allowIncomingMessage(MessageIn message, int id)
+            public MessageIn handleMessage(MessageIn message, int id, InetAddress to)
             {
-                return false;
+                return null;
             }
         });
 
@@ -142,7 +130,7 @@ public class ValidatorTest
             super(key);
         }
 
-        public RowIndexEntry write(long currentPosition, SequentialWriter out) throws IOException
+        public RowIndexEntry write(long currentPosition, DataOutputPlus out) throws IOException
         {
             throw new UnsupportedOperationException();
         }
@@ -164,10 +152,10 @@ public class ValidatorTest
         final RepairJobDesc desc = new RepairJobDesc(UUID.randomUUID(), UUID.randomUUID(), keyspace, columnFamily, range);
 
         final SimpleCondition lock = new SimpleCondition();
-        MessagingService.instance().addMessageSink(new IMessageSink()
+        SinkManager.add(new IMessageSink()
         {
             @SuppressWarnings("unchecked")
-            public boolean allowOutgoingMessage(MessageOut message, int id, InetAddress to)
+            public MessageOut handleMessage(MessageOut message, int id, InetAddress to)
             {
                 try
                 {
@@ -177,19 +165,19 @@ public class ValidatorTest
                         assertEquals(RepairMessage.Type.VALIDATION_COMPLETE, m.messageType);
                         assertEquals(desc, m.desc);
                         assertFalse(((ValidationComplete) m).success);
-                        assertNull(((ValidationComplete) m).tree);
+                        assertNull(((ValidationComplete)m).tree);
                     }
                 }
                 finally
                 {
                     lock.signalAll();
                 }
-                return false;
+                return null;
             }
 
-            public boolean allowIncomingMessage(MessageIn message, int id)
+            public MessageIn handleMessage(MessageIn message, int id, InetAddress to)
             {
-                return false;
+                return null;
             }
         });
 

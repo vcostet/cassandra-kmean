@@ -22,19 +22,14 @@ import java.util.*;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.cql3.restrictions.Restriction;
-import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
-import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.composites.CBuilder;
 import org.apache.cassandra.db.composites.Composite;
-import org.apache.cassandra.db.composites.Composites;
-import org.apache.cassandra.db.composites.CompositesBuilder;
 import org.apache.cassandra.db.filter.ColumnSlice;
 import org.apache.cassandra.db.filter.SliceQueryFilter;
 import org.apache.cassandra.db.marshal.BooleanType;
@@ -45,12 +40,6 @@ import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.Pair;
-
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
-
-import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
-
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 
 /*
  * Abstract parent class of individual modifications, i.e. INSERT, UPDATE and DELETE.
@@ -94,25 +83,6 @@ public abstract class ModificationStatement implements CQLStatement
         this.boundTerms = boundTerms;
         this.cfm = cfm;
         this.attrs = attrs;
-    }
-
-    public boolean usesFunction(String ksName, String functionName)
-    {
-        if (attrs.usesFunction(ksName, functionName))
-            return true;
-        for (Restriction restriction : processedKeys.values())
-            if (restriction != null && restriction.usesFunction(ksName, functionName))
-                return true;
-        for (Operation operation : columnOperations)
-            if (operation != null && operation.usesFunction(ksName, functionName))
-                return true;
-        for (ColumnCondition condition : columnConditions)
-            if (condition != null && condition.usesFunction(ksName, functionName))
-                return true;
-        for (ColumnCondition condition : staticConditions)
-            if (condition != null && condition.usesFunction(ksName, functionName))
-                return true;
-        return false;
     }
 
     public abstract boolean requireFullClusteringKey();
@@ -247,7 +217,7 @@ public abstract class ModificationStatement implements CQLStatement
 
     public void addKeyValue(ColumnDefinition def, Term value) throws InvalidRequestException
     {
-        addKeyValues(def, new SingleColumnRestriction.EQ(def, value));
+        addKeyValues(def, new SingleColumnRestriction.EQ(value, false));
     }
 
     public void processWhereClause(List<Relation> whereClause, VariableSpecifications names) throws InvalidRequestException
@@ -261,7 +231,7 @@ public abstract class ModificationStatement implements CQLStatement
             }
             SingleColumnRelation rel = (SingleColumnRelation) relation;
 
-            if (rel.onToken())
+            if (rel.onToken)
                 throw new InvalidRequestException(String.format("The token function cannot be used in WHERE clauses for UPDATE and DELETE statements: %s", relation));
 
             ColumnIdentifier id = rel.getEntity().prepare(cfm);
@@ -275,9 +245,31 @@ public abstract class ModificationStatement implements CQLStatement
                 case CLUSTERING_COLUMN:
                     Restriction restriction;
 
-                    if (rel.isEQ() || (def.isPartitionKey() && rel.isIN()))
+                    if (rel.operator() == Operator.EQ)
                     {
-                        restriction = rel.toRestriction(cfm, names);
+                        Term t = rel.getValue().prepare(keyspace(), def);
+                        t.collectMarkerSpecification(names);
+                        restriction = new SingleColumnRestriction.EQ(t, false);
+                    }
+                    else if (def.kind == ColumnDefinition.Kind.PARTITION_KEY && rel.operator() == Operator.IN)
+                    {
+                        if (rel.getValue() != null)
+                        {
+                            Term t = rel.getValue().prepare(keyspace(), def);
+                            t.collectMarkerSpecification(names);
+                            restriction = new SingleColumnRestriction.InWithMarker((Lists.Marker)t);
+                        }
+                        else
+                        {
+                            List<Term> values = new ArrayList<Term>(rel.getInValues().size());
+                            for (Term.Raw raw : rel.getInValues())
+                            {
+                                Term t = raw.prepare(keyspace(), def);
+                                t.collectMarkerSpecification(names);
+                                values.add(t);
+                            }
+                            restriction = new SingleColumnRestriction.InWithValues(values);
+                        }
                     }
                     else
                     {
@@ -295,23 +287,38 @@ public abstract class ModificationStatement implements CQLStatement
     public List<ByteBuffer> buildPartitionKeyNames(QueryOptions options)
     throws InvalidRequestException
     {
-        CompositesBuilder keyBuilder = new CompositesBuilder(cfm.getKeyValidatorAsCType());
+        CBuilder keyBuilder = cfm.getKeyValidatorAsCType().builder();
+        List<ByteBuffer> keys = new ArrayList<ByteBuffer>();
         for (ColumnDefinition def : cfm.partitionKeyColumns())
         {
-            Restriction r = checkNotNull(processedKeys.get(def.name), "Missing mandatory PRIMARY KEY part %s", def.name);
-            r.appendTo(keyBuilder, options);
-        }
+            Restriction r = processedKeys.get(def.name);
+            if (r == null)
+                throw new InvalidRequestException(String.format("Missing mandatory PRIMARY KEY part %s", def.name));
 
-        return Lists.transform(keyBuilder.build(), new Function<Composite, ByteBuffer>()
-        {
-            @Override
-            public ByteBuffer apply(Composite composite)
+            List<ByteBuffer> values = r.values(options);
+
+            if (keyBuilder.remainingCount() == 1)
             {
-                ByteBuffer byteBuffer = composite.toByteBuffer();
-                ThriftValidation.validateKey(cfm, byteBuffer);
-                return byteBuffer;
+                for (ByteBuffer val : values)
+                {
+                    if (val == null)
+                        throw new InvalidRequestException(String.format("Invalid null value for partition key part %s", def.name));
+                    ByteBuffer key = keyBuilder.buildWith(val).toByteBuffer();
+                    ThriftValidation.validateKey(cfm, key);
+                    keys.add(key);
+                }
             }
-        });
+            else
+            {
+                if (values.size() != 1)
+                    throw new InvalidRequestException("IN is only supported on the last column of the partition key");
+                ByteBuffer val = values.get(0);
+                if (val == null)
+                    throw new InvalidRequestException(String.format("Invalid null value for partition key part %s", def.name));
+                keyBuilder.add(val);
+            }
+        }
+        return keys;
     }
 
     public Composite createClusteringPrefix(QueryOptions options)
@@ -352,7 +359,7 @@ public abstract class ModificationStatement implements CQLStatement
     private Composite createClusteringPrefixBuilderInternal(QueryOptions options)
     throws InvalidRequestException
     {
-        CompositesBuilder builder = new CompositesBuilder(cfm.comparator);
+        CBuilder builder = cfm.comparator.prefixBuilder();
         ColumnDefinition firstEmptyKey = null;
         for (ColumnDefinition def : cfm.clusteringColumns())
         {
@@ -360,19 +367,24 @@ public abstract class ModificationStatement implements CQLStatement
             if (r == null)
             {
                 firstEmptyKey = def;
-                checkFalse(requireFullClusteringKey() && !cfm.comparator.isDense() && cfm.comparator.isCompound(), 
-                           "Missing mandatory PRIMARY KEY part %s", def.name);
+                if (requireFullClusteringKey() && !cfm.comparator.isDense() && cfm.comparator.isCompound())
+                    throw new InvalidRequestException(String.format("Missing mandatory PRIMARY KEY part %s", def.name));
             }
             else if (firstEmptyKey != null)
             {
-                throw invalidRequest("Missing PRIMARY KEY part %s since %s is set", firstEmptyKey.name, def.name);
+                throw new InvalidRequestException(String.format("Missing PRIMARY KEY part %s since %s is set", firstEmptyKey.name, def.name));
             }
             else
             {
-                r.appendTo(builder, options);
+                List<ByteBuffer> values = r.values(options);
+                assert values.size() == 1; // We only allow IN for row keys so far
+                ByteBuffer val = values.get(0);
+                if (val == null)
+                    throw new InvalidRequestException(String.format("Invalid null value for clustering key part %s", def.name));
+                builder.add(val);
             }
         }
-        return builder.build().get(0); // We only allow IN for row keys so far
+        return builder.build();
     }
 
     protected ColumnDefinition getFirstEmptyKey()
@@ -538,7 +550,7 @@ public abstract class ModificationStatement implements CQLStatement
         boolean success = cf == null;
 
         ColumnSpecification spec = new ColumnSpecification(ksName, cfName, CAS_RESULT_COLUMN, BooleanType.instance);
-        ResultSet.ResultMetadata metadata = new ResultSet.ResultMetadata(Collections.singletonList(spec));
+        ResultSet.Metadata metadata = new ResultSet.Metadata(Collections.singletonList(spec));
         List<List<ByteBuffer>> rows = Collections.singletonList(Collections.singletonList(BooleanType.instance.decompose(success)));
 
         ResultSet rs = new ResultSet(metadata, rows);
@@ -565,7 +577,7 @@ public abstract class ModificationStatement implements CQLStatement
             row.addAll(right.rows.get(i));
             rows.add(row);
         }
-        return new ResultSet(new ResultSet.ResultMetadata(specs), rows);
+        return new ResultSet(new ResultSet.Metadata(specs), rows);
     }
 
     private static ResultSet buildCasFailureResultSet(ByteBuffer key, ColumnFamily cf, Iterable<ColumnDefinition> columnsWithConditions, boolean isBatch, QueryOptions options)
@@ -591,15 +603,14 @@ public abstract class ModificationStatement implements CQLStatement
             }
             for (ColumnDefinition def : columnsWithConditions)
                 defs.add(def);
-            selection = Selection.forColumns(cfm, new ArrayList<>(defs));
-
+            selection = Selection.forColumns(new ArrayList<>(defs));
         }
 
         long now = System.currentTimeMillis();
-        Selection.ResultSetBuilder builder = selection.resultSetBuilder(now, false);
+        Selection.ResultSetBuilder builder = selection.resultSetBuilder(now);
         SelectStatement.forSelection(cfm, selection).processColumnFamily(key, cf, options, now, builder);
 
-        return builder.build(options.getProtocolVersion());
+        return builder.build();
     }
 
     public ResultMessage executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
@@ -690,8 +701,7 @@ public abstract class ModificationStatement implements CQLStatement
         {
             VariableSpecifications boundNames = getBoundVariables();
             ModificationStatement statement = prepare(boundNames);
-            CFMetaData cfm = ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
-            return new ParsedStatement.Prepared(statement, boundNames, boundNames.getPartitionKeyBindIndexes(cfm));
+            return new ParsedStatement.Prepared(statement, boundNames);
         }
 
         public ModificationStatement prepare(VariableSpecifications boundNames) throws InvalidRequestException

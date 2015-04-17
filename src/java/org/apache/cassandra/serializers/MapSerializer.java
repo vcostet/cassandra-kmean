@@ -24,6 +24,7 @@ import java.util.*;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.transport.Server;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
 public class MapSerializer<K, V> extends CollectionSerializer<Map<K, V>>
@@ -113,21 +114,6 @@ public class MapSerializer<K, V> extends CollectionSerializer<Map<K, V>>
         {
             throw new MarshalException("Not enough bytes to read a map");
         }
-    }
-
-    /**
-     * Deserializes a serialized map and returns a map of unserialized (ByteBuffer) keys and values.
-     */
-    public Map<ByteBuffer, ByteBuffer> deserializeToByteBufferCollection(ByteBuffer bytes, int protocolVersion)
-    {
-        ByteBuffer input = bytes.duplicate();
-        int n = readCollectionSize(input, protocolVersion);
-        Map<ByteBuffer, ByteBuffer> m = new LinkedHashMap<>(n);
-
-        for (int i = 0; i < n; i++)
-            m.put(readValue(input, protocolVersion), readValue(input, protocolVersion));
-
-        return m;
     }
 
     /**

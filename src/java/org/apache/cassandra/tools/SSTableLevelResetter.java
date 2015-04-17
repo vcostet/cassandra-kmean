@@ -17,10 +17,12 @@
  */
 package org.apache.cassandra.tools;
 
+import java.io.IOException;
 import java.io.PrintStream;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -38,13 +40,13 @@ public class SSTableLevelResetter
     /**
      * @param args a list of sstables whose metadata we are changing
      */
-    public static void main(String[] args)
+    public static void main(String[] args) throws IOException
     {
         PrintStream out = System.out;
         if (args.length == 0)
         {
             out.println("This command should be run with Cassandra stopped!");
-            out.println("Usage: sstablelevelreset <keyspace> <table>");
+            out.println("Usage: sstablelevelreset <keyspace> <columnfamily>");
             System.exit(1);
         }
 
@@ -52,7 +54,7 @@ public class SSTableLevelResetter
         {
             out.println("This command should be run with Cassandra stopped, otherwise you will get very strange behavior");
             out.println("Verify that Cassandra is not running and then execute the command like this:");
-            out.println("Usage: sstablelevelreset --really-reset <keyspace> <table>");
+            out.println("Usage: sstablelevelreset --really-reset <keyspace> <columnfamily>");
             System.exit(1);
         }
 
@@ -61,7 +63,7 @@ public class SSTableLevelResetter
         try
         {
             // load keyspace descriptions.
-            Schema.instance.loadFromDisk(false);
+            DatabaseDescriptor.loadSchemas();
 
             String keyspaceName = args[1];
             String columnfamily = args[2];
@@ -96,7 +98,7 @@ public class SSTableLevelResetter
 
             if (!foundSSTable)
             {
-                out.println("Found no sstables, did you give the correct keyspace/table?");
+                out.println("Found no sstables, did you give the correct keyspace/columnfamily?");
             }
         }
         catch (Throwable t)

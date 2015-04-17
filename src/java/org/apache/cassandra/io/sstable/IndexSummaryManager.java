@@ -37,7 +37,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -266,7 +265,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             // We can't change the sampling level of sstables with the old format, because the serialization format
             // doesn't include the sampling level.  Leave this one as it is.  (See CASSANDRA-8993 for details.)
             logger.trace("SSTable {} cannot be re-sampled due to old sstable format", sstable);
-            if (!sstable.descriptor.version.hasSamplingLevel())
+            if (!sstable.descriptor.version.hasSamplingLevel)
                 oldFormatSSTables.add(sstable);
         }
         nonCompacting.removeAll(oldFormatSSTables);

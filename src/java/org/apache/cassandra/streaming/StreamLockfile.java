@@ -28,12 +28,12 @@ import java.util.List;
 import java.util.UUID;
 
 import com.google.common.base.Charsets;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.SSTableWriter;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -58,7 +58,7 @@ public class StreamLockfile
 
     public StreamLockfile(File directory, UUID uuid)
     {
-        lockfile = new File(directory, uuid + FILE_EXT);
+        lockfile = new File(directory, uuid.toString() + FILE_EXT);
     }
 
     public StreamLockfile(File lockfile)

@@ -79,7 +79,6 @@ public class YamlConfigurationLoader implements ConfigurationLoader
         return url;
     }
 
-    @Override
     public Config loadConfig() throws ConfigurationException
     {
         return loadConfig(getStorageConfigURL());
@@ -87,6 +86,7 @@ public class YamlConfigurationLoader implements ConfigurationLoader
 
     public Config loadConfig(URL url) throws ConfigurationException
     {
+        InputStream input = null;
         try
         {
             logger.info("Loading settings from {}", url);
@@ -102,9 +102,9 @@ public class YamlConfigurationLoader implements ConfigurationLoader
             }
 
             logConfig(configBytes);
-
+            
             org.yaml.snakeyaml.constructor.Constructor constructor = new org.yaml.snakeyaml.constructor.Constructor(Config.class);
-            TypeDescription seedDesc = new TypeDescription(ParameterizedClass.class);
+            TypeDescription seedDesc = new TypeDescription(SeedProviderDef.class);
             seedDesc.putMapPropertyType("parameters", String.class, String.class);
             constructor.addTypeDescription(seedDesc);
             MissingPropertiesChecker propertiesChecker = new MissingPropertiesChecker();
@@ -117,7 +117,7 @@ public class YamlConfigurationLoader implements ConfigurationLoader
         }
         catch (YAMLException e)
         {
-            throw new ConfigurationException("Invalid yaml: " + url, e);
+            throw new ConfigurationException("Invalid yaml", e);
         }
     }
 
@@ -132,7 +132,7 @@ public class YamlConfigurationLoader implements ConfigurationLoader
                 configMap.put(sensitiveKey, "<REDACTED>");
             }
         }
-        logger.info("Node configuration:[{}]", Joiner.on("; ").join(configMap.entrySet()));
+        logger.info("Node configuration:[" + Joiner.on("; ").join(configMap.entrySet()) + "]");
     }
 
     private static class MissingPropertiesChecker extends PropertyUtils

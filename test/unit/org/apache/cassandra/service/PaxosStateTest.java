@@ -45,7 +45,6 @@ public class PaxosStateTest
     public static void setUpClass() throws Throwable
     {
         SchemaLoader.loadSchema();
-        SchemaLoader.schemaDefinition("PaxosStateTest");
     }
 
     @AfterClass
@@ -57,7 +56,7 @@ public class PaxosStateTest
     @Test
     public void testCommittingAfterTruncation() throws Exception
     {
-        ColumnFamilyStore cfs = Keyspace.open("PaxosStateTestKeyspace1").getColumnFamilyStore("Standard1");
+        ColumnFamilyStore cfs = Keyspace.open("Keyspace1").getColumnFamilyStore("Standard1");
         DecoratedKey key = Util.dk("key" + System.nanoTime());
         CellName name = Util.cellname("col");
         ByteBuffer value = ByteBufferUtil.bytes(0);

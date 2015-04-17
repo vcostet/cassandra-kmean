@@ -25,7 +25,6 @@ import java.nio.MappedByteBuffer;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
-import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.apache.cassandra.config.Config;

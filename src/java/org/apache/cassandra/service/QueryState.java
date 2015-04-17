@@ -17,12 +17,11 @@
  */
 package org.apache.cassandra.service;
 
-import java.net.InetAddress;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.transport.Connection;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Represents the state related to a given query.
@@ -66,8 +65,8 @@ public class QueryState
             return true;
         }
 
-        double traceProbability = StorageService.instance.getTraceProbability();
-        return traceProbability != 0 && ThreadLocalRandom.current().nextDouble() < traceProbability;
+        double tracingProbability = StorageService.instance.getTracingProbability();
+        return tracingProbability != 0 && ThreadLocalRandom.current().nextDouble() < tracingProbability;
     }
 
     public void prepareTracingSession(UUID sessionId)
@@ -77,27 +76,15 @@ public class QueryState
 
     public void createTracingSession()
     {
-        createTracingSession(null);
-    }
-
-    public void createTracingSession(Connection connection)
-    {
-        UUID session = this.preparedTracingSession;
-        if (session == null)
+        if (this.preparedTracingSession == null)
         {
-            Tracing.instance.newSession(connection);
+            Tracing.instance.newSession();
         }
         else
         {
-            Tracing.instance.newSession(connection, session);
+            UUID session = this.preparedTracingSession;
             this.preparedTracingSession = null;
+            Tracing.instance.newSession(session);
         }
-    }
-
-    public InetAddress getClientAddress()
-    {
-        return clientState.isInternal
-             ? null
-             : clientState.getRemoteAddress().getAddress();
     }
 }

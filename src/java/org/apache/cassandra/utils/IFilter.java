@@ -17,19 +17,15 @@
  */
 package org.apache.cassandra.utils;
 
+import java.nio.ByteBuffer;
+
 import org.apache.cassandra.utils.concurrent.SharedCloseable;
 
 public interface IFilter extends SharedCloseable
 {
-    public interface FilterKey
-    {
-        /** Places the murmur3 hash of the key in the given long array of size at least two. */
-        void filterHash(long[] dest);
-    }
+    void add(ByteBuffer key);
 
-    void add(FilterKey key);
-
-    boolean isPresent(FilterKey key);
+    boolean isPresent(ByteBuffer key);
 
     void clear();
 

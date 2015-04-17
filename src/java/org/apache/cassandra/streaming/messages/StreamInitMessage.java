@@ -46,16 +46,14 @@ public class StreamInitMessage
 
     // true if this init message is to connect for outgoing message on receiving side
     public final boolean isForOutgoing;
-    public final boolean keepSSTableLevel;
 
-    public StreamInitMessage(InetAddress from, int sessionIndex, UUID planId, String description, boolean isForOutgoing, boolean keepSSTableLevel)
+    public StreamInitMessage(InetAddress from, int sessionIndex, UUID planId, String description, boolean isForOutgoing)
     {
         this.from = from;
         this.sessionIndex = sessionIndex;
         this.planId = planId;
         this.description = description;
         this.isForOutgoing = isForOutgoing;
-        this.keepSSTableLevel = keepSSTableLevel;
     }
 
     /**
@@ -107,7 +105,6 @@ public class StreamInitMessage
             UUIDSerializer.serializer.serialize(message.planId, out, MessagingService.current_version);
             out.writeUTF(message.description);
             out.writeBoolean(message.isForOutgoing);
-            out.writeBoolean(message.keepSSTableLevel);
         }
 
         public StreamInitMessage deserialize(DataInput in, int version) throws IOException
@@ -117,8 +114,7 @@ public class StreamInitMessage
             UUID planId = UUIDSerializer.serializer.deserialize(in, MessagingService.current_version);
             String description = in.readUTF();
             boolean sentByInitiator = in.readBoolean();
-            boolean keepSSTableLevel = in.readBoolean();
-            return new StreamInitMessage(from, sessionIndex, planId, description, sentByInitiator, keepSSTableLevel);
+            return new StreamInitMessage(from, sessionIndex, planId, description, sentByInitiator);
         }
 
         public long serializedSize(StreamInitMessage message, int version)
@@ -128,7 +124,6 @@ public class StreamInitMessage
             size += UUIDSerializer.serializer.serializedSize(message.planId, MessagingService.current_version);
             size += TypeSizes.NATIVE.sizeof(message.description);
             size += TypeSizes.NATIVE.sizeof(message.isForOutgoing);
-            size += TypeSizes.NATIVE.sizeof(message.keepSSTableLevel);
             return size;
         }
     }

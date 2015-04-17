@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.service.MigrationListener;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.service.StorageService;
@@ -92,7 +92,7 @@ public class SizeEstimatesRecorder extends MigrationListener implements Runnable
             Refs<SSTableReader> refs = null;
             while (refs == null)
             {
-                ColumnFamilyStore.ViewFragment view = table.select(table.viewFilter(Range.makeRowRange(range)));
+                ColumnFamilyStore.ViewFragment view = table.select(table.viewFilter(range.toRowBounds()));
                 refs = Refs.tryRef(view.sstables);
             }
 

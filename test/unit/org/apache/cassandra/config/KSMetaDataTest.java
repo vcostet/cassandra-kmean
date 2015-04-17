@@ -19,6 +19,7 @@
 
 package org.apache.cassandra.config;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -38,7 +39,11 @@ public class KSMetaDataTest
         options.put("key2", "value2");
         options.put("key3", "value3");
 
-        KSMetaData ksMeta = new KSMetaData("test", SimpleStrategy.class, options, true);
+        KSMetaData ksMeta = new KSMetaData("test",
+                                            SimpleStrategy.class,
+                                            options,
+                                            true,
+                                            Collections.<CFMetaData>emptyList());
 
         assertTrue(ksMeta.toString().contains(options.toString()));
     }

@@ -18,13 +18,14 @@
 package org.apache.cassandra.db;
 
 import java.io.DataInput;
+import java.io.DataOutput;
 import java.io.IOException;
 import java.util.UUID;
 
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.io.ISSTableSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.UUIDSerializer;
@@ -70,7 +71,7 @@ public class ColumnFamilySerializer implements IVersionedSerializer<ColumnFamily
                 columnSerializer.serialize(cell, out);
                 written++;
             }
-            assert count == written: "Table had " + count + " columns, but " + written + " written";
+            assert count == written: "Column family had " + count + " columns, but " + written + " written";
         }
         catch (IOException e)
         {
@@ -146,7 +147,7 @@ public class ColumnFamilySerializer implements IVersionedSerializer<ColumnFamily
         throw new UnsupportedOperationException();
     }
 
-    public ColumnFamily deserializeFromSSTable(DataInput in, Version version)
+    public ColumnFamily deserializeFromSSTable(DataInput in, Descriptor.Version version)
     {
         throw new UnsupportedOperationException();
     }

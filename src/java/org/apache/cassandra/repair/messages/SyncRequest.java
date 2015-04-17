@@ -30,7 +30,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.CompactEndpointSerializationHelper;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.RepairJobDesc;
 
 /**
@@ -67,10 +66,7 @@ public class SyncRequest extends RepairMessage
             CompactEndpointSerializationHelper.serialize(message.dst, out);
             out.writeInt(message.ranges.size());
             for (Range<Token> range : message.ranges)
-            {
-                MessagingService.validatePartitioner(range);
-                AbstractBounds.tokenSerializer.serialize(range, out, version);
-            }
+                AbstractBounds.serializer.serialize(range, out, version);
         }
 
         public SyncRequest deserialize(DataInput in, int version) throws IOException
@@ -82,7 +78,7 @@ public class SyncRequest extends RepairMessage
             int rangesCount = in.readInt();
             List<Range<Token>> ranges = new ArrayList<>(rangesCount);
             for (int i = 0; i < rangesCount; ++i)
-                ranges.add((Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, MessagingService.globalPartitioner(), version));
+                ranges.add((Range<Token>) AbstractBounds.serializer.deserialize(in, version).toTokenBounds());
             return new SyncRequest(desc, owner, src, dst, ranges);
         }
 
@@ -92,19 +88,8 @@ public class SyncRequest extends RepairMessage
             size += 3 * CompactEndpointSerializationHelper.serializedSize(message.initiator);
             size += TypeSizes.NATIVE.sizeof(message.ranges.size());
             for (Range<Token> range : message.ranges)
-                size += AbstractBounds.tokenSerializer.serializedSize(range, version);
+                size += AbstractBounds.serializer.serializedSize(range, version);
             return size;
         }
-    }
-
-    @Override
-    public String toString()
-    {
-        return "SyncRequest{" +
-                "initiator=" + initiator +
-                ", src=" + src +
-                ", dst=" + dst +
-                ", ranges=" + ranges +
-                "} " + super.toString();
     }
 }

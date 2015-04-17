@@ -67,12 +67,9 @@ public abstract class CompositesIndex extends AbstractSimplePerColumnSecondaryIn
                 case SET:
                     return new CompositesIndexOnCollectionKey();
                 case MAP:
-                    if (cfDef.hasIndexOption(SecondaryIndex.INDEX_KEYS_OPTION_NAME))
-                        return new CompositesIndexOnCollectionKey();
-                    else if (cfDef.hasIndexOption(SecondaryIndex.INDEX_ENTRIES_OPTION_NAME))
-                        return new CompositesIndexOnCollectionKeyAndValue();
-                    else
-                        return new CompositesIndexOnCollectionValue();
+                    return cfDef.hasIndexOption(SecondaryIndex.INDEX_KEYS_OPTION_NAME)
+                         ? new CompositesIndexOnCollectionKey()
+                         : new CompositesIndexOnCollectionValue();
             }
         }
 
@@ -102,12 +99,9 @@ public abstract class CompositesIndex extends AbstractSimplePerColumnSecondaryIn
                 case SET:
                     return CompositesIndexOnCollectionKey.buildIndexComparator(baseMetadata, cfDef);
                 case MAP:
-                    if (cfDef.hasIndexOption(SecondaryIndex.INDEX_KEYS_OPTION_NAME))
-                        return CompositesIndexOnCollectionKey.buildIndexComparator(baseMetadata, cfDef);
-                    else if (cfDef.hasIndexOption(SecondaryIndex.INDEX_ENTRIES_OPTION_NAME))
-                        return CompositesIndexOnCollectionKeyAndValue.buildIndexComparator(baseMetadata, cfDef);
-                    else
-                        return CompositesIndexOnCollectionValue.buildIndexComparator(baseMetadata, cfDef);
+                    return cfDef.hasIndexOption(SecondaryIndex.INDEX_KEYS_OPTION_NAME)
+                         ? CompositesIndexOnCollectionKey.buildIndexComparator(baseMetadata, cfDef)
+                         : CompositesIndexOnCollectionValue.buildIndexComparator(baseMetadata, cfDef);
             }
         }
 
@@ -168,7 +162,6 @@ public abstract class CompositesIndex extends AbstractSimplePerColumnSecondaryIn
         {
             options.remove(SecondaryIndex.INDEX_VALUES_OPTION_NAME);
             options.remove(SecondaryIndex.INDEX_KEYS_OPTION_NAME);
-            options.remove(SecondaryIndex.INDEX_ENTRIES_OPTION_NAME);
         }
 
         if (!options.isEmpty())

@@ -26,6 +26,7 @@ import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.compress.CompressionParameters;
 import org.apache.cassandra.thrift.*;
@@ -85,7 +86,7 @@ public class ConfigHelper
             throw new UnsupportedOperationException("keyspace may not be null");
 
         if (columnFamily == null)
-            throw new UnsupportedOperationException("table may not be null");
+            throw new UnsupportedOperationException("columnfamily may not be null");
 
         conf.set(INPUT_KEYSPACE_CONFIG, keyspace);
         conf.set(INPUT_COLUMNFAMILY_CONFIG, columnFamily);
@@ -416,7 +417,14 @@ public class ConfigHelper
 
     public static IPartitioner getInputPartitioner(Configuration conf)
     {
-        return FBUtilities.newPartitioner(conf.get(INPUT_PARTITIONER_CONFIG));
+        try
+        {
+            return FBUtilities.newPartitioner(conf.get(INPUT_PARTITIONER_CONFIG));
+        }
+        catch (ConfigurationException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     public static int getOutputRpcPort(Configuration conf)
@@ -446,7 +454,14 @@ public class ConfigHelper
 
     public static IPartitioner getOutputPartitioner(Configuration conf)
     {
-        return FBUtilities.newPartitioner(conf.get(OUTPUT_PARTITIONER_CONFIG));
+        try
+        {
+            return FBUtilities.newPartitioner(conf.get(OUTPUT_PARTITIONER_CONFIG));
+        }
+        catch (ConfigurationException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     public static String getOutputCompressionClass(Configuration conf)
@@ -488,11 +503,15 @@ public class ConfigHelper
         if (getOutputCompressionClass(conf) == null)
             return new CompressionParameters(null);
 
-        Map<String, String> options = new HashMap<String, String>(2);
+        Map<String, String> options = new HashMap<String, String>();
         options.put(CompressionParameters.SSTABLE_COMPRESSION, getOutputCompressionClass(conf));
         options.put(CompressionParameters.CHUNK_LENGTH_KB, getOutputCompressionChunkLength(conf));
 
-        return CompressionParameters.create(options);
+        try {
+            return CompressionParameters.create(options);
+        } catch (ConfigurationException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public static boolean getOutputLocalDCOnly(Configuration conf)

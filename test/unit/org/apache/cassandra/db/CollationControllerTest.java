@@ -18,69 +18,50 @@
 */
 package org.apache.cassandra.db;
 
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.filter.QueryFilter;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 
-public class CollationControllerTest
+public class CollationControllerTest extends SchemaLoader
 {
-    private static final String KEYSPACE1 = "CollationControllerTest";
-    private static final String CF = "Standard1";
-    private static final String CFGCGRACE = "StandardGCGS0";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CFGCGRACE).gcGraceSeconds(0));
-    }
-
     @Test
     public void getTopLevelColumnsSkipsSSTablesModifiedBeforeRowDelete() 
     {
-        Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+        Keyspace keyspace = Keyspace.open("Keyspace1");
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Standard1");
         Mutation rm;
         DecoratedKey dk = Util.dk("key1");
         
         // add data
         rm = new Mutation(keyspace.getName(), dk.getKey());
         rm.add(cfs.name, Util.cellname("Column1"), ByteBufferUtil.bytes("asdf"), 0);
-        rm.applyUnsafe();
+        rm.apply();
         cfs.forceBlockingFlush();
         
         // remove
         rm = new Mutation(keyspace.getName(), dk.getKey());
         rm.delete(cfs.name, 10);
-        rm.applyUnsafe();
+        rm.apply();
         
         // add another mutation because sstable maxtimestamp isn't set
         // correctly during flush if the most recent mutation is a row delete
         rm = new Mutation(keyspace.getName(), Util.dk("key2").getKey());
         rm.add(cfs.name, Util.cellname("Column1"), ByteBufferUtil.bytes("zxcv"), 20);
-        rm.applyUnsafe();
+        rm.apply();
         
         cfs.forceBlockingFlush();
 
         // add yet one more mutation
         rm = new Mutation(keyspace.getName(), dk.getKey());
         rm.add(cfs.name, Util.cellname("Column1"), ByteBufferUtil.bytes("foobar"), 30);
-        rm.applyUnsafe();
+        rm.apply();
         cfs.forceBlockingFlush();
 
         // A NamesQueryFilter goes down one code path (through collectTimeOrderedData())
@@ -102,8 +83,8 @@ public class CollationControllerTest
     @Test
     public void ensureTombstonesAppliedAfterGCGS()
     {
-        Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CFGCGRACE);
+        Keyspace keyspace = Keyspace.open("Keyspace1");
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("StandardGCGS0");
         cfs.disableAutoCompaction();
 
         Mutation rm;
@@ -113,13 +94,13 @@ public class CollationControllerTest
         // add data
         rm = new Mutation(keyspace.getName(), dk.getKey());
         rm.add(cfs.name, cellName, ByteBufferUtil.bytes("asdf"), 0);
-        rm.applyUnsafe();
+        rm.apply();
         cfs.forceBlockingFlush();
 
         // remove
         rm = new Mutation(keyspace.getName(), dk.getKey());
         rm.delete(cfs.name, cellName, 0);
-        rm.applyUnsafe();
+        rm.apply();
         cfs.forceBlockingFlush();
 
         // use "realistic" query times since we'll compare these numbers to the local deletion time of the tombstone

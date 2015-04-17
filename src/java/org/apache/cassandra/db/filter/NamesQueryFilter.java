@@ -24,22 +24,22 @@ import java.util.Iterator;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.lang3.StringUtils;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
+import org.apache.cassandra.db.columniterator.SSTableNamesIterator;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.composites.CType;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
-import org.apache.cassandra.utils.SearchIterator;
 
 public class NamesQueryFilter implements IDiskAtomFilter
 {
@@ -86,12 +86,12 @@ public class NamesQueryFilter implements IDiskAtomFilter
 
     public OnDiskAtomIterator getSSTableColumnIterator(SSTableReader sstable, DecoratedKey key)
     {
-        return sstable.iterator(key, columns);
+        return new SSTableNamesIterator(sstable, key, columns);
     }
 
     public OnDiskAtomIterator getSSTableColumnIterator(SSTableReader sstable, FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry)
     {
-        return sstable.iterator(file, key, columns, indexEntry);
+        return new SSTableNamesIterator(sstable, file, key, columns, indexEntry);
     }
 
     public void collectReducedColumns(ColumnFamily container, Iterator<Cell> reducedColumns, int gcBefore, long now)
@@ -191,23 +191,21 @@ public class NamesQueryFilter implements IDiskAtomFilter
     {
         private final ColumnFamily cf;
         private final DecoratedKey key;
-        private final Iterator<CellName> names;
-        private final SearchIterator<CellName, Cell> cells;
+        private final Iterator<CellName> iter;
 
-        public ByNameColumnIterator(Iterator<CellName> names, DecoratedKey key, ColumnFamily cf)
+        public ByNameColumnIterator(Iterator<CellName> iter, DecoratedKey key, ColumnFamily cf)
         {
-            this.names = names;
+            this.iter = iter;
             this.cf = cf;
             this.key = key;
-            this.cells = cf.searchIterator();
         }
 
         protected OnDiskAtom computeNext()
         {
-            while (names.hasNext() && cells.hasNext())
+            while (iter.hasNext())
             {
-                CellName current = names.next();
-                Cell cell = cells.next(current);
+                CellName current = iter.next();
+                Cell cell = cf.getColumn(current);
                 if (cell != null)
                     return cell;
             }
@@ -250,7 +248,7 @@ public class NamesQueryFilter implements IDiskAtomFilter
         public NamesQueryFilter deserialize(DataInput in, int version) throws IOException
         {
             int size = in.readInt();
-            SortedSet<CellName> columns = new TreeSet<>(type);
+            SortedSet<CellName> columns = new TreeSet<CellName>(type);
             ISerializer<CellName> serializer = type.cellSerializer();
             for (int i = 0; i < size; ++i)
                 columns.add(serializer.deserialize(in));
@@ -273,7 +271,7 @@ public class NamesQueryFilter implements IDiskAtomFilter
     public Iterator<RangeTombstone> getRangeTombstoneIterator(final ColumnFamily source)
     {
         if (!source.deletionInfo().hasRanges())
-            return Iterators.emptyIterator();
+            return Iterators.<RangeTombstone>emptyIterator();
 
         return new AbstractIterator<RangeTombstone>()
         {

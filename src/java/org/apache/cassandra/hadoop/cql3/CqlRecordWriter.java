@@ -25,9 +25,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import org.apache.cassandra.schema.LegacySchemaTables;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.LongType;
@@ -63,7 +60,7 @@ import org.apache.thrift.transport.TTransport;
  *
  * @see CqlOutputFormat
  */
-class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String, ByteBuffer>, List<ByteBuffer>> implements AutoCloseable
+class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String, ByteBuffer>, List<ByteBuffer>>
 {
     private static final Logger logger = LoggerFactory.getLogger(CqlRecordWriter.class);
 
@@ -92,7 +89,7 @@ class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String, ByteB
         this.context = context;
     }
 
-    CqlRecordWriter(Configuration conf, Progressable progressable)
+    CqlRecordWriter(Configuration conf, Progressable progressable) throws IOException
     {
         this(conf);
         this.progressable = progressable;
@@ -302,6 +299,10 @@ class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String, ByteB
                 {
                     result = client.prepare_cql3_query(ByteBufferUtil.bytes(cql), Compression.NONE);
                 }
+                catch (InvalidRequestException e)
+                {
+                    throw new RuntimeException("failed to prepare cql query " + cql, e);
+                }
                 catch (TException e)
                 {
                     throw new RuntimeException("failed to prepare cql query " + cql, e);
@@ -332,20 +333,18 @@ class CqlRecordWriter extends AbstractColumnFamilyRecordWriter<Map<String, ByteB
         return partitionKey;
     }
 
-    // FIXME
     /** retrieve the key validator from system.schema_columnfamilies table */
     private void retrievePartitionKeyValidator(Cassandra.Client client) throws Exception
     {
         String keyspace = ConfigHelper.getOutputKeyspace(conf);
         String cfName = ConfigHelper.getOutputColumnFamily(conf);
-        String query = String.format("SELECT key_validator, key_aliases, column_aliases " +
-                                     "FROM %s.%s " +
-                                     "WHERE keyspace_name = '%s' and columnfamily_name = '%s'",
-                                     SystemKeyspace.NAME,
-                                     LegacySchemaTables.COLUMNFAMILIES,
-                                     keyspace,
-                                     cfName);
-        CqlResult result = client.execute_cql3_query(ByteBufferUtil.bytes(query), Compression.NONE, ConsistencyLevel.ONE);
+        String query = "SELECT key_validator," +
+        		       "       key_aliases," +
+        		       "       column_aliases " +
+                       "FROM system.schema_columnfamilies " +
+                       "WHERE keyspace_name='%s' and columnfamily_name='%s'";
+        String formatted = String.format(query, keyspace, cfName);
+        CqlResult result = client.execute_cql3_query(ByteBufferUtil.bytes(formatted), Compression.NONE, ConsistencyLevel.ONE);
 
         Column rawKeyValidator = result.rows.get(0).columns.get(0);
         String validator = ByteBufferUtil.string(ByteBuffer.wrap(rawKeyValidator.getValue()));

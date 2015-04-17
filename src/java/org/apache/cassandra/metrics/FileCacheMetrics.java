@@ -17,13 +17,14 @@
  */
 package org.apache.cassandra.metrics;
 
-import com.codahale.metrics.Gauge;
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.RatioGauge;
+import java.util.concurrent.TimeUnit;
+
+import com.yammer.metrics.Metrics;
+import com.yammer.metrics.core.Gauge;
+import com.yammer.metrics.core.Meter;
+import com.yammer.metrics.core.MetricName;
+import com.yammer.metrics.util.RatioGauge;
 import org.apache.cassandra.service.FileCacheService;
-
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
-
 
 public class FileCacheMetrics
 {
@@ -40,19 +41,23 @@ public class FileCacheMetrics
 
     public FileCacheMetrics()
     {
-        hits = Metrics.meter(factory.createMetricName("Hits"));
-        requests = Metrics.meter(factory.createMetricName("Requests"));
-        hitRate = Metrics.register(factory.createMetricName("HitRate"), new RatioGauge()
+        hits = Metrics.newMeter(factory.createMetricName("Hits"), "hits", TimeUnit.SECONDS);
+        requests = Metrics.newMeter(factory.createMetricName("Requests"), "requests", TimeUnit.SECONDS);
+        hitRate = Metrics.newGauge(factory.createMetricName("HitRate"), new RatioGauge()
         {
-            @Override
-            public Ratio getRatio()
+            protected double getNumerator()
             {
-                return Ratio.of(hits.getCount(), requests.getCount());
+                return hits.count();
+            }
+
+            protected double getDenominator()
+            {
+                return requests.count();
             }
         });
-        size = Metrics.register(factory.createMetricName("Size"), new Gauge<Long>()
+        size = Metrics.newGauge(factory.createMetricName("Size"), new Gauge<Long>()
         {
-            public Long getValue()
+            public Long value()
             {
                 return FileCacheService.instance.sizeInBytes();
             }

@@ -21,8 +21,6 @@
 package org.apache.cassandra.db;
 
 import java.util.*;
-
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
@@ -31,32 +29,15 @@ import com.google.common.collect.Sets;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.composites.*;
 import org.apache.cassandra.db.filter.ColumnSlice;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.SimpleStrategy;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.BatchRemoveIterator;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
-public class ArrayBackedSortedColumnsTest
+public class ArrayBackedSortedColumnsTest extends SchemaLoader
 {
-    private static final String KEYSPACE1 = "ArrayBackedSortedColumnsTest";
-    private static final String CF_STANDARD1 = "Standard1";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1));
-    }
-
     @Test
     public void testAdd()
     {
@@ -66,7 +47,7 @@ public class ArrayBackedSortedColumnsTest
 
     private CFMetaData metadata()
     {
-        return Schema.instance.getCFMetaData(KEYSPACE1, CF_STANDARD1);
+        return Schema.instance.getCFMetaData("Keyspace1", "Standard1");
     }
 
     private void testAddInternal(boolean reversed)
@@ -235,43 +216,6 @@ public class ArrayBackedSortedColumnsTest
         assertSame(map.iterator(), map.iterator(ColumnSlice.ALL_COLUMNS_ARRAY));
     }
 
-    @Test
-    public void testSearchIterator()
-    {
-        CellNameType type = new SimpleDenseCellNameType(Int32Type.instance);
-        ColumnFamily map = ArrayBackedSortedColumns.factory.create(metadata(), false);
-
-        int[] values = new int[]{ 1, 2, 3, 5, 9, 15, 21, 22 };
-
-        for (int i = 0; i < values.length; ++i)
-            map.addColumn(new BufferCell(type.makeCellName(values[i])));
-
-        SearchIterator<CellName, Cell> iter = map.searchIterator();
-        for (int i = 0 ; i < values.length ; i++)
-            assertSame(values[i], iter.next(type.makeCellName(values[i])));
-
-        iter = map.searchIterator();
-        for (int i = 0 ; i < values.length ; i+=2)
-            assertSame(values[i], iter.next(type.makeCellName(values[i])));
-
-        iter = map.searchIterator();
-        for (int i = 0 ; i < values.length ; i+=4)
-            assertSame(values[i], iter.next(type.makeCellName(values[i])));
-
-        iter = map.searchIterator();
-        for (int i = 0 ; i < values.length ; i+=1)
-        {
-            if (i % 2 == 0)
-            {
-                Cell cell = iter.next(type.makeCellName(values[i] - 1));
-                if (i > 0 && values[i - 1] == values[i] - 1)
-                    assertSame(values[i - 1], cell);
-                else
-                    assertNull(cell);
-            }
-        }
-    }
-
     private <T> void assertSame(Iterable<T> c1, Iterable<T> c2)
     {
         assertSame(c1.iterator(), c2.iterator());
@@ -285,11 +229,6 @@ public class ArrayBackedSortedColumnsTest
             fail("The collection don't have the same size");
     }
 
-    private void assertSame(int name, Cell cell)
-    {
-        int value = ByteBufferUtil.toInt(cell.name().toByteBuffer());
-        assert name == value : "Expected " + name + " but got " + value;
-    }
     private void assertSame(int[] names, Iterator<Cell> iter)
     {
         for (int name : names)

@@ -19,16 +19,24 @@
 package org.apache.cassandra.pig;
 
 import java.io.IOException;
+import java.nio.charset.CharacterCodingException;
 import java.util.Iterator;
 
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.thrift.AuthenticationException;
+import org.apache.cassandra.thrift.AuthorizationException;
+import org.apache.cassandra.thrift.InvalidRequestException;
+import org.apache.cassandra.thrift.NotFoundException;
+import org.apache.cassandra.thrift.SchemaDisagreementException;
+import org.apache.cassandra.thrift.TimedOutException;
+import org.apache.cassandra.thrift.UnavailableException;
 import org.apache.cassandra.utils.Hex;
 import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.Tuple;
 import org.apache.thrift.TException;
-
+import org.apache.thrift.transport.TTransportException;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -56,7 +64,6 @@ public class CqlTableDataTypeTest extends PigTestBase
     //MAP
     //Create table to test the above data types
     private static String[] statements = {
-            "DROP KEYSPACE IF EXISTS cql3ks",
             "CREATE KEYSPACE cql3ks WITH replication = {'class': 'SimpleStrategy', 'replication_factor' : 1}",
             "USE cql3ks;",
 
@@ -201,15 +208,17 @@ public class CqlTableDataTypeTest extends PigTestBase
     };
 
     @BeforeClass
-    public static void setup() throws IOException, ConfigurationException, TException
+    public static void setup() throws TTransportException, IOException, InterruptedException, ConfigurationException,
+                                      AuthenticationException, AuthorizationException, InvalidRequestException, UnavailableException, TimedOutException, TException, NotFoundException, CharacterCodingException, ClassNotFoundException, NoSuchFieldException, IllegalAccessException, InstantiationException
     {
         startCassandra();
-        executeCQLStatements(statements);
+        setupDataByCql(statements);
         startHadoopCluster();
     }
 
     @Test
-    public void testCqlNativeStorageRegularType() throws IOException
+    public void testCqlNativeStorageRegularType()
+    throws AuthenticationException, AuthorizationException, InvalidRequestException, UnavailableException, TimedOutException, TException, NotFoundException, SchemaDisagreementException, IOException
     {
         //input_cql=select * from cqltable where token(key) > ? and token(key) <= ?
         cqlTableTest("rows = LOAD 'cql://cql3ks/cqltable?" + defaultParameters + nativeParameters + "&input_cql=select%20*%20from%20cqltable%20where%20token(key)%20%3E%20%3F%20and%20token(key)%20%3C%3D%20%3F' USING CqlNativeStorage();");
@@ -279,7 +288,8 @@ public class CqlTableDataTypeTest extends PigTestBase
     }
 
     @Test
-    public void testCqlNativeStorageSetType() throws IOException
+    public void testCqlNativeStorageSetType()
+    throws AuthenticationException, AuthorizationException, InvalidRequestException, UnavailableException, TimedOutException, TException, NotFoundException, SchemaDisagreementException, IOException
     {
         //input_cql=select * from settable where token(key) > ? and token(key) <= ?
         settableTest("set_rows = LOAD 'cql://cql3ks/settable?" + defaultParameters + nativeParameters + "&input_cql=select%20*%20from%20settable%20where%20token(key)%20%3E%20%3F%20and%20token(key)%20%3C%3D%20%3F' USING CqlNativeStorage();");
@@ -345,7 +355,8 @@ public class CqlTableDataTypeTest extends PigTestBase
     }
 
     @Test
-    public void testCqlNativeStorageListType() throws IOException
+    public void testCqlNativeStorageListType()
+    throws AuthenticationException, AuthorizationException, InvalidRequestException, UnavailableException, TimedOutException, TException, NotFoundException, SchemaDisagreementException, IOException
     {
         //input_cql=select * from listtable where token(key) > ? and token(key) <= ?
         listtableTest("list_rows = LOAD 'cql://cql3ks/listtable?" + defaultParameters + nativeParameters + "&input_cql=select%20*%20from%20listtable%20where%20token(key)%20%3E%20%3F%20and%20token(key)%20%3C%3D%20%3F' USING CqlNativeStorage();");
@@ -411,7 +422,8 @@ public class CqlTableDataTypeTest extends PigTestBase
     }
 
     @Test
-    public void testCqlNativeStorageMapType() throws IOException
+    public void testCqlNativeStorageMapType()
+    throws AuthenticationException, AuthorizationException, InvalidRequestException, UnavailableException, TimedOutException, TException, NotFoundException, SchemaDisagreementException, IOException
     {
         //input_cql=select * from maptable where token(key) > ? and token(key) <= ?
         maptableTest("map_rows = LOAD 'cql://cql3ks/maptable?" + defaultParameters + nativeParameters + "&input_cql=select%20*%20from%20maptable%20where%20token(key)%20%3E%20%3F%20and%20token(key)%20%3C%3D%20%3F' USING CqlNativeStorage();");

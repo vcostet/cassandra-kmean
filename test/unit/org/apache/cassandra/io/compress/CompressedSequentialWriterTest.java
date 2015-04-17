@@ -19,7 +19,6 @@ package org.apache.cassandra.io.compress;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
 
@@ -28,15 +27,15 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.composites.SimpleDenseCellNameType;
 import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.FileMark;
-import org.apache.cassandra.io.util.RandomAccessReader;
 
 public class CompressedSequentialWriterTest
 {
     private ICompressor compressor;
 
-    private void runTests(String testName) throws IOException
+    private void runTests(String testName) throws IOException, ConfigurationException
     {
         // Test small < 1 chunk data set
         testWrite(File.createTempFile(testName + "_small", "1"), 25);
@@ -49,27 +48,27 @@ public class CompressedSequentialWriterTest
     }
 
     @Test
-    public void testLZ4Writer() throws IOException
+    public void testLZ4Writer() throws IOException, ConfigurationException
     {
         compressor = LZ4Compressor.instance;
         runTests("LZ4");
     }
 
     @Test
-    public void testDeflateWriter() throws IOException
+    public void testDeflateWriter() throws IOException, ConfigurationException
     {
         compressor = DeflateCompressor.instance;
         runTests("Deflate");
     }
 
     @Test
-    public void testSnappyWriter() throws IOException
+    public void testSnappyWriter() throws IOException, ConfigurationException
     {
         compressor = SnappyCompressor.instance;
         runTests("Snappy");
     }
 
-    private void testWrite(File f, int bytesToTest) throws IOException
+    private void testWrite(File f, int bytesToTest) throws IOException, ConfigurationException
     {
         try
         {
@@ -85,9 +84,6 @@ public class CompressedSequentialWriterTest
             // Test both write with byte[] and ByteBuffer
             r.nextBytes(dataPre);
             r.nextBytes(rawPost);
-            ByteBuffer dataPost = makeBB(bytesToTest);
-            dataPost.put(rawPost);
-            dataPost.flip();
 
             writer.write(dataPre);
             FileMark mark = writer.mark();
@@ -98,11 +94,11 @@ public class CompressedSequentialWriterTest
                 writer.write((byte)i);
             }
             writer.resetAndTruncate(mark);
-            writer.write(dataPost);
+            writer.write(rawPost);
             writer.close();
 
             assert f.exists();
-            RandomAccessReader reader = CompressedRandomAccessReader.open(filename, new CompressionMetadata(filename + ".metadata", f.length()));
+            CompressedRandomAccessReader reader = CompressedRandomAccessReader.open(filename, new CompressionMetadata(filename + ".metadata", f.length(), true));
             assertEquals(dataPre.length + rawPost.length, reader.length());
             byte[] result = new byte[(int)reader.length()];
 
@@ -125,12 +121,5 @@ public class CompressedSequentialWriterTest
             if (metadata.exists())
                 metadata.delete();
         }
-    }
-
-    private ByteBuffer makeBB(int size)
-    {
-        return compressor.useDirectOutputByteBuffers()
-                ? ByteBuffer.allocateDirect(size)
-                : ByteBuffer.allocate(size);
     }
 }

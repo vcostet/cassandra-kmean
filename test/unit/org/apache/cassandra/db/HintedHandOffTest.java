@@ -24,41 +24,27 @@ import java.net.InetAddress;
 import java.util.Map;
 import java.util.UUID;
 
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UUIDType;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 
-public class HintedHandOffTest
+public class HintedHandOffTest extends SchemaLoader
 {
 
-    public static final String KEYSPACE4 = "HintedHandOffTest4";
+    public static final String KEYSPACE4 = "Keyspace4";
     public static final String STANDARD1_CF = "Standard1";
     public static final String COLUMN1 = "column1";
-
-    @BeforeClass
-    public static void defineSchema() throws ConfigurationException
-    {
-        SchemaLoader.prepareServer();
-        SchemaLoader.createKeyspace(KEYSPACE4,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE4, STANDARD1_CF));
-    }
 
     // Test compaction of hints column family. It shouldn't remove all columns on compaction.
     @Test
@@ -66,7 +52,7 @@ public class HintedHandOffTest
     {
         // prepare hints column family
         Keyspace systemKeyspace = Keyspace.open("system");
-        ColumnFamilyStore hintStore = systemKeyspace.getColumnFamilyStore(SystemKeyspace.HINTS);
+        ColumnFamilyStore hintStore = systemKeyspace.getColumnFamilyStore(SystemKeyspace.HINTS_CF);
         hintStore.clearUnsafe();
         hintStore.metadata.gcGraceSeconds(36000); // 10 hours
         hintStore.setCompactionStrategyClass(SizeTieredCompactionStrategy.class.getCanonicalName());
@@ -80,7 +66,7 @@ public class HintedHandOffTest
                                               System.currentTimeMillis(),
                                               HintedHandOffManager.calculateHintTTL(rm),
                                               UUID.randomUUID())
-                                     .applyUnsafe();
+                                     .apply();
 
         // flush data to disk
         hintStore.forceBlockingFlush();
@@ -101,7 +87,7 @@ public class HintedHandOffTest
             HintedHandOffManager.instance.metrics.incrPastWindow(InetAddress.getLocalHost());
         HintedHandOffManager.instance.metrics.log();
 
-        UntypedResultSet rows = executeInternal("SELECT hints_dropped FROM system." + SystemKeyspace.PEER_EVENTS);
+        UntypedResultSet rows = executeInternal("SELECT hints_dropped FROM system." + SystemKeyspace.PEER_EVENTS_CF);
         Map<UUID, Integer> returned = rows.one().getMap("hints_dropped", UUIDType.instance, Int32Type.instance);
         assertEquals(Iterators.getLast(returned.values().iterator()).intValue(), 99);
     }
@@ -110,7 +96,7 @@ public class HintedHandOffTest
     public void testTruncateHints() throws Exception
     {
         Keyspace systemKeyspace = Keyspace.open("system");
-        ColumnFamilyStore hintStore = systemKeyspace.getColumnFamilyStore(SystemKeyspace.HINTS);
+        ColumnFamilyStore hintStore = systemKeyspace.getColumnFamilyStore(SystemKeyspace.HINTS_CF);
         hintStore.clearUnsafe();
 
         // insert 1 hint
@@ -121,7 +107,7 @@ public class HintedHandOffTest
                                               System.currentTimeMillis(),
                                               HintedHandOffManager.calculateHintTTL(rm),
                                               UUID.randomUUID())
-                                     .applyUnsafe();
+                                     .apply();
 
         assert getNoOfHints() == 1;
 
@@ -138,7 +124,7 @@ public class HintedHandOffTest
     private int getNoOfHints()
     {
         String req = "SELECT * FROM system.%s";
-        UntypedResultSet resultSet = executeInternal(String.format(req, SystemKeyspace.HINTS));
+        UntypedResultSet resultSet = executeInternal(String.format(req, SystemKeyspace.HINTS_CF));
         return resultSet.size();
     }
 }

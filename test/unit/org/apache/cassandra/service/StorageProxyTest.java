@@ -25,6 +25,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 
+import org.apache.cassandra.SchemaLoader;
 import static org.apache.cassandra.Util.token;
 import static org.apache.cassandra.Util.rp;
 
@@ -38,7 +39,7 @@ import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-public class StorageProxyTest
+public class StorageProxyTest extends SchemaLoader
 {
     private static Range<RowPosition> range(RowPosition left, RowPosition right)
     {

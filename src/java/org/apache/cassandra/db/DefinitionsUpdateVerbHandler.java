@@ -26,7 +26,6 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.schema.LegacySchemaTables;
 import org.apache.cassandra.utils.WrappedRunnable;
 
 /**
@@ -47,7 +46,7 @@ public class DefinitionsUpdateVerbHandler implements IVerbHandler<Collection<Mut
         {
             public void runMayThrow() throws Exception
             {
-                LegacySchemaTables.mergeSchema(message.payload);
+                DefsTables.mergeSchema(message.payload);
             }
         });
     }

@@ -41,12 +41,13 @@ public class Ec2MultiRegionSnitch extends Ec2Snitch
 {
     private static final String PUBLIC_IP_QUERY_URL = "http://169.254.169.254/latest/meta-data/public-ipv4";
     private static final String PRIVATE_IP_QUERY_URL = "http://169.254.169.254/latest/meta-data/local-ipv4";
+    private final InetAddress localPublicAddress;
     private final String localPrivateAddress;
 
     public Ec2MultiRegionSnitch() throws IOException, ConfigurationException
     {
         super();
-        InetAddress localPublicAddress = InetAddress.getByName(awsApiCall(PUBLIC_IP_QUERY_URL));
+        localPublicAddress = InetAddress.getByName(awsApiCall(PUBLIC_IP_QUERY_URL));
         logger.info("EC2Snitch using publicIP as identifier: {}", localPublicAddress);
         localPrivateAddress = awsApiCall(PRIVATE_IP_QUERY_URL);
         // use the Public IP to broadcast Address to other nodes.
@@ -54,7 +55,6 @@ public class Ec2MultiRegionSnitch extends Ec2Snitch
         DatabaseDescriptor.setBroadcastRpcAddress(localPublicAddress);
     }
 
-    @Override
     public void gossiperStarting()
     {
         super.gossiperStarting();

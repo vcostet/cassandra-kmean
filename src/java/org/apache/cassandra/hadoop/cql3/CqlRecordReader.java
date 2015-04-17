@@ -30,25 +30,16 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
+
 import org.apache.commons.lang3.StringUtils;
+
+import org.apache.cassandra.hadoop.HadoopCompat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.ColumnDefinitions;
-import com.datastax.driver.core.ColumnMetadata;
-import com.datastax.driver.core.ResultSet;
-import com.datastax.driver.core.Row;
-import com.datastax.driver.core.Session;
-import com.datastax.driver.core.TupleValue;
-import com.datastax.driver.core.UDTValue;
-import org.apache.cassandra.schema.LegacySchemaTables;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.hadoop.ColumnFamilySplit;
 import org.apache.cassandra.hadoop.ConfigHelper;
-import org.apache.cassandra.hadoop.HadoopCompat;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.hadoop.conf.Configuration;
@@ -56,23 +47,25 @@ import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 
+import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ColumnDefinitions;
+import com.datastax.driver.core.ColumnMetadata;
+import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.Session;
 /**
- * <p>
  * CqlRecordReader reads the rows return from the CQL query
  * It uses CQL auto-paging.
- * </p>
- * <p>
+ * <p/>
  * Return a Long as a local CQL row key starts from 0;
- * </p>
- * {@code
+ * <p/>
  * Row as C* java driver CQL result set row
  * 1) select clause must include partition key columns (to calculate the progress based on the actual CF row processed)
  * 2) where clause must include token(partition_key1, ...  , partition_keyn) > ? and 
  *       token(partition_key1, ... , partition_keyn) <= ?  (in the right order) 
- * }
  */
 public class CqlRecordReader extends RecordReader<Long, Row>
-        implements org.apache.hadoop.mapred.RecordReader<Long, Row>, AutoCloseable
+        implements org.apache.hadoop.mapred.RecordReader<Long, Row>
 {
     private static final Logger logger = LoggerFactory.getLogger(CqlRecordReader.class);
 
@@ -231,7 +224,7 @@ public class CqlRecordReader extends RecordReader<Long, Row>
 
     public Long createKey()
     {
-        return Long.valueOf(0L);
+        return new Long(0L);
     }
 
     public Row createValue()
@@ -275,7 +268,7 @@ public class CqlRecordReader extends RecordReader<Long, Row>
                 return endOfData();
 
             Row row = rows.next();
-            Map<String, ByteBuffer> keyColumns = new HashMap<String, ByteBuffer>(partitionBoundColumns.size()); 
+            Map<String, ByteBuffer> keyColumns = new HashMap<String, ByteBuffer>(); 
             for (String column : partitionBoundColumns.keySet())
                 keyColumns.put(column, row.getBytesUnsafe(column));
 
@@ -521,30 +514,6 @@ public class CqlRecordReader extends RecordReader<Long, Row>
         {
             return row.getMap(name, keysClass, valuesClass);
         }
-
-        @Override
-        public UDTValue getUDTValue(int i)
-        {
-            return row.getUDTValue(i);
-        }
-
-        @Override
-        public UDTValue getUDTValue(String name)
-        {
-            return row.getUDTValue(name);
-        }
-
-        @Override
-        public TupleValue getTupleValue(int i)
-        {
-            return row.getTupleValue(i);
-        }
-
-        @Override
-        public TupleValue getTupleValue(String name)
-        {
-            return row.getTupleValue(name);
-        }
     }
 
     /**
@@ -604,15 +573,8 @@ public class CqlRecordReader extends RecordReader<Long, Row>
 
     private void fetchKeys()
     {
-        String query = String.format("SELECT column_name, component_index, type " +
-                                     "FROM %s.%s " +
-                                     "WHERE keyspace_name = '%s' AND columnfamily_name = '%s'",
-                                     SystemKeyspace.NAME,
-                                     LegacySchemaTables.COLUMNS,
-                                     keyspace,
-                                     cfName);
-
-        // get CF meta data
+        String query = "SELECT column_name, component_index, type FROM system.schema_columns WHERE keyspace_name='" +
+                       keyspace + "' and columnfamily_name='" + cfName + "'";
         List<Row> rows = session.execute(query).all();
         if (rows.isEmpty())
         {
