@@ -58,7 +58,6 @@ import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.thrift.ThriftServer;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
-import org.ctc.Hirudinea;
 
 /**
  * The <code>CassandraDaemon</code> is an abstraction for a Cassandra daemon
@@ -438,40 +437,6 @@ public class CassandraDaemon
         InetAddress nativeAddr = DatabaseDescriptor.getRpcAddress();
         int nativePort = DatabaseDescriptor.getNativeTransportPort();
         nativeServer = new org.apache.cassandra.transport.Server(nativeAddr, nativePort);
-
-        logger.info("TEUJZHIZBOUCBQCUKBZQQQGC1");
-        logger.info("TEUJZHIZBOUCBQCUKBZQQQGC2");
-        logger.info("TEUJZHIZBOUCBQCUKBZQQQGC3");
-
-        
-        ArrayList<String> entry = new ArrayList<String>();
-        entry.add("17-04-2015");
-        entry.add("7");
-        newStationEntry("station1", entry);
-                logger.info("entry!");
-        ArrayList<String> entry2 = new ArrayList<String>();
-        entry.add("31-04-2015");
-        entry.add("1010110");
-        newStationEntry("station1", entry);
-                logger.info("entry!");
-        ArrayList<String> entry3 = new ArrayList<String>();
-        entry.add("1-05-2015");
-        entry.add("99999");
-        newStationEntry("station2", entry);
-                logger.info("entry!");
-
-        for (String key : stations.keySet()) {
-            logger.info("key            :"+key);
-            for (ArrayList entry : stations.get(key)) {  
-                for (String item : entry) {   
-                    logger.info("item           :"+item);
-                }
-            }
-        }
-
-        logger.info("TEUJZHIZBOUCBQCUKBZQQQGC4");
-
-        logger.info("TEUJZHIZBOUCBQCUKBZQQQGC5");
     }
 
     /**

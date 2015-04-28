@@ -39,7 +39,7 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.Exception;
 
-import org.ctc.Hirudinea;
+import org.apache.cassandra.hirudinea.Hirudinea;
 
 // TODO convert this to a Builder pattern instead of encouraging M.add directly,
 // which is less-efficient since we have to keep a mutable HashMap around
@@ -214,52 +214,8 @@ public class Mutation implements IMutation
      */
     public void apply()
     {
-        // PERDU
-        //logger.info("MUTTTTTTTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATION");
         Keyspace ks = Keyspace.open(keyspaceName);
         Hirudinea.extract(ks, this);
-
-        logger.info(ks.toString());
-        // logger.info(this.toString());
-
-        // Collection<ColumnFamily> values = modifications.values();
-
-        // try {
-        //     String t = ByteBufferUtil.string(key);
-        //     String kl = Long.toString(ByteBufferUtil.toLong(key));
-        //     logger.info("Key: " + t + " -- " + kl);
-        // } catch (Exception e) {}
-
-
-        // for (ColumnFamily c: values) {
-        //     logger.info(c.toString());
-
-        //     String name = c.metadata.cfName;
-
-
-        //     logger.info("Table: " + name);
-
-        //     for (Cell cell: c) {
-        //         String cname = c.metadata.comparator.getString(cell.name());
-
-        //         logger.info("Column modified: " + cname);
-
-
-        //         if (cname.equals("station_name")) {
-        //             logger.info("Column modified: " + cname);
-        //             try {
-        //                 logger.info(ByteBufferUtil.string(cell.value()));
-        //             } catch (Exception e) {}
-        //         }
-        //         else if (cname.equals("n")) {
-        //             logger.info("Column modified: " + cname);
-        //             try {
-        //                 logger.info(Long.toString(ByteBufferUtil.toLong(cell.value())));
-        //             } catch (Exception e) {}
-        //         }
-        //     }
-        // }
-
         ks.apply(this, ks.metadata.durableWrites);
     }
 
