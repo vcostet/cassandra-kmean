@@ -23,6 +23,9 @@ public class Hirudinea
 
 	public static final ConcurrentHashMap<Long, ArrayList<StationEntry>> stations = new ConcurrentHashMap();
 
+	/*
+	 *  Request analyze
+	 */
 	public static void extract(Keyspace ks, Mutation m) {
 
 		String keyspace_name = ks.getName();
@@ -63,15 +66,16 @@ public class Hirudinea
 		}
 	}
 
+	/*
+	 *  Stations
+	 */
 	public static void addStationEntry(Long station_id, Long value, Date date) {
 
 		ArrayList<StationEntry> entries;
 		if (stations.get(station_id) == null) {
-			logger.info("EMPTY");
 			entries = new ArrayList<StationEntry>();
 		}
 		else {
-			logger.info("NOT EMPTY");
 			entries = stations.get(station_id);
 		}
 
@@ -88,10 +92,57 @@ public class Hirudinea
 			ArrayList<StationEntry> value = entry.getValue();
 
 			logger.info("\t Station {}", key);
+			logger.info("\t\t Time serie: {}", timeSerieToString(getTimeSerie(key, 1000L*60, 1000L)));
 
 			for (StationEntry se: value) {
 				logger.info("\t\t {}: {}", se.date, se.value);
 			}
 		}
+	}
+
+	/*
+	 *  Time series
+	 */
+	public static ArrayList<Long> getTimeSerie(Long station_id, Date start, Date end, Long interval) {
+		ArrayList<StationEntry> list_entries = stations.get(station_id);
+
+		ArrayList<Long> time_serie = new ArrayList<Long>();
+
+		Long total_number = (end.getTime() - start.getTime()) / interval;
+
+		for (int i = 0; i < total_number; i++) {
+			time_serie.add(0L);
+		}
+
+		for (StationEntry se: list_entries) {
+			int index = (int) ((se.date.getTime() - start.getTime()) / interval);
+			for (int i = index; i < time_serie.size(); i++) {
+				if (i >= 0) {
+					time_serie.set(i, se.value);
+				}
+			}
+		}
+
+		return time_serie;
+	}
+
+	public static String timeSerieToString(ArrayList<Long> ts) {
+		String s = "[";
+
+		for (Long l: ts) {
+			s += l + ", ";
+		}
+		s += "]";
+
+		return s;
+	}
+
+	public static ArrayList<Long> getTimeSerie(Long station_id, Long duration, Long interval) {
+
+		Date start = new Date((new Date()).getTime() - duration);
+		Date end = new Date();
+
+		return getTimeSerie(station_id, start, end, interval);
+
 	}
 }
