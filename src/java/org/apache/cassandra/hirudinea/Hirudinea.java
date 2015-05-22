@@ -13,11 +13,15 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import weka.clusterers.SimpleKMeans;
+
 public class Hirudinea
 {
 	public static final String KEYSPACE_NAME = "tp";
 	public static final String TABLE_NAME = "station";
 	public static final String NUMBER_COLUMN_NAME = "n";
+	public static final Long TIME_WINDOW = 1000L*60;
+	public static final Long INTERVAL = 1000L;
 
 	private static final Logger logger = LoggerFactory.getLogger(Hirudinea.class);
 
@@ -82,7 +86,8 @@ public class Hirudinea
 		entries.add(new StationEntry(value, date));
 		stations.put(station_id, entries);
 
-		displayStations();
+		kmean(3);
+		//displayStations();
 	}
 
 	public static void displayStations() {
@@ -144,5 +149,21 @@ public class Hirudinea
 
 		return getTimeSerie(station_id, start, end, interval);
 
+	}
+
+	public static void kmean(int n) {
+
+		ArrayList<ArrayList<Long>> timeSeries = new ArrayList<ArrayList<Long>>();
+
+		for (Long s_id : stations.keySet()) {
+			timeSeries.add(getTimeSerie(s_id, TIME_WINDOW, INTERVAL));
+		}
+		System.out.println(timeSeries);
+
+	}
+
+	public static ArrayList<Long> dba(ArrayList<ArrayList<Long>> timeSeries) {
+
+		return new ArrayList<Long>(0);
 	}
 }
