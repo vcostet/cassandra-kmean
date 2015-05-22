@@ -145,4 +145,33 @@ public class Hirudinea
 		return getTimeSerie(station_id, start, end, interval);
 
 	}
+
+	public static Double distance(ArrayList<Long> series1, ArrayList<Long> series2) {
+		int n = series1.size();
+		int m = series2.size();
+
+		ArrayList<ArrayList<Double>> dtw = new ArrayList<ArrayList<Double>>(n); 
+		for (i = 0; i < n; i++) {
+			List<Double> row = new ArrayList<Double>(m);
+			for (j = 0; j < m; j++) {
+				if (j == 0 || i == 0) {
+					row.add(Double.POSITIVE_INFINITY); 
+				}
+				else{
+					row.add(0); 
+				}
+				
+			}
+			dtw.add(row);
+		}
+
+		for (i = 1; i < n; i++) {
+			for (j = 1; j < m ; j++) {
+				Double cost = (Double)(asb(series1.get() - series2.get()));
+				dtw.get(i).get(j) = cost + (Double)(Math.min(Math.min(dtw.get(i-1).get(j), dtw.get(i).get(j-1)), dtw.get(i-1).get(j-1)));
+			}
+		}
+
+		return dtw.get(n).get(m);
+	}
 }
