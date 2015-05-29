@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.Iterator;
 import java.nio.ByteBuffer;
 import java.util.Date;
+import java.lang.Math;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -158,12 +159,48 @@ public class Hirudinea
 		for (Long s_id : stations.keySet()) {
 			timeSeries.add(getTimeSerie(s_id, TIME_WINDOW, INTERVAL));
 		}
-		System.out.println(timeSeries);
+
+		for (ArrayList<Long> t1 : timeSeries) {
+			for (ArrayList<Long> t2 : timeSeries) {
+				System.out.println(distance(t1, t2));
+			}
+		}
 
 	}
 
 	public static ArrayList<Long> dba(ArrayList<ArrayList<Long>> timeSeries) {
 
 		return new ArrayList<Long>(0);
+	}
+
+	public static Double distance(ArrayList<Long> series1, ArrayList<Long> series2) {
+		int n = series1.size();
+		int m = series2.size();
+
+		ArrayList<ArrayList<Double>> dtw = new ArrayList<ArrayList<Double>>(n); 
+		for (int i = 0; i < n; i++) {
+			ArrayList<Double> row = new ArrayList<Double>(m);
+			for (int j = 0; j < m; j++) {
+				if (j == 0 || i == 0) {
+					row.add(Double.POSITIVE_INFINITY); 
+				}
+				else{
+					row.add(0D); 
+				}
+				
+			}
+			dtw.add(row);
+		}
+
+		dtw.get(0).set(0, 0D);
+
+		for (int i = 1; i < n; i++) {
+			for (int j = 1; j < m ; j++) {
+				Double cost = Math.abs(series1.get(i).doubleValue() - series2.get(j).doubleValue());
+				dtw.get(i).set(j, cost + (Double)(Math.min(Math.min(dtw.get(i-1).get(j), dtw.get(i).get(j-1)), dtw.get(i-1).get(j-1))));
+			}
+		}
+
+		return dtw.get(n-1).get(m-1);
 	}
 }
