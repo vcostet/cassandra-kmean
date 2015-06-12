@@ -87,8 +87,9 @@ public class Hirudinea
 		entries.add(new StationEntry(value, date));
 		stations.put(station_id, entries);
 
+		displayStations();
 		kmean(3);
-		//displayStations();
+		
 	}
 
 	public static void displayStations() {
@@ -160,17 +161,200 @@ public class Hirudinea
 			timeSeries.add(getTimeSerie(s_id, TIME_WINDOW, INTERVAL));
 		}
 
-		for (ArrayList<Long> t1 : timeSeries) {
-			for (ArrayList<Long> t2 : timeSeries) {
-				System.out.println(distance(t1, t2));
+		ArrayList<Long> ts1 = new ArrayList<Long>();
+		ArrayList<Long> ts2 = new ArrayList<Long>();
+		ArrayList<Long> ts3 = new ArrayList<Long>();
+
+		for (int i = 0; i < 60; i++) {
+			ts1.add(Math.round(Math.random() * 100));
+			ts2.add(Math.round(Math.random() * 100));
+			ts3.add(Math.round(Math.random() * 100));
+		}
+
+		for (ArrayList<Long> t : timeSeries) {
+			Double d1 = dtwDistance(t, ts1);
+			Double d2 = dtwDistance(t, ts2);
+			Double d3 = dtwDistance(t, ts3);
+
+			System.out.println(d1 + " " + d2 + " " + d3);
+
+			if (d1 < d2 && d1 < d3) {
+				System.out.println("D1 !!");
+			} else if (d2 < d1 && d2 < d3) {
+				System.out.println("D2 !!");
+			} else {
+				System.out.println("D3 !!");
 			}
 		}
 
+		/*
+		3 kTS au hasard
+		Pour toutes les TS :
+			calcul DTW avec les 3 TS
+			associer avec la kTS la plus proche
+
+		Faire la moyenne (dba) pour les trois groupes
+
+		LOOP
+
+		 */
+
+		/*ArrayList<ArrayList<Long>> testDBA = new ArrayList<ArrayList<Long>>();
+
+		for (ArrayList<Long> t1 : timeSeries) {
+			for (ArrayList<Long> t2 : timeSeries) {
+				System.out.println("DTW");
+				System.out.println(distance(t1, t2));
+				System.out.println(dtwDistance(t1, t2));
+			}
+			testDBA.add(t1);
+		}
+
+		System.out.println("DBA:");
+		ArrayList<Long> C = null;
+
+		for (int i = 0; i < 4; i++) {
+			C = dba(testDBA, C);
+			System.out.println(timeSerieToString(C));
+		}*/
 	}
 
-	public static ArrayList<Long> dba(ArrayList<ArrayList<Long>> timeSeries) {
+	public static ArrayList<Long> dba(ArrayList<ArrayList<Long>> timeSeries, ArrayList<Long> c) {
+		if (c == null) {
+			c = timeSeries.get(0);
+		}
 
-		return new ArrayList<Long>(0);
+		int T = timeSeries.get(0).size();
+		int Tprime = c.size();
+
+		ArrayList<ArrayList<Long>> assocTable = new ArrayList<ArrayList<Long>>();
+		for (int i = 0; i < T; i++) {
+			assocTable.add(new ArrayList<Long>());
+		}
+
+		Double[][][][] m;
+		Double[] path;
+		for (ArrayList<Long> seq : timeSeries) {
+			m = dtw(c, seq);
+			//printDTW(m);
+			int i = Tprime - 1;
+			int j = T - 1;
+
+			while (i >= 0 && j >= 0) {
+				
+				assocTable.get(i).add(seq.get(j));
+				path = second(m[i][j]);
+				i = path[0].intValue();
+				j = path[1].intValue();
+				/*logger.info("AAAAAAAAAAAAA");
+				logger.info("{} {}", i, j);*/
+			}
+		}
+
+		ArrayList<Long> Cprime = new ArrayList<Long>();
+		for (int i = 0; i < T; i++) {
+			Cprime.add(barycenter(assocTable.get(i)));
+		}
+
+		return Cprime;
+	}
+
+	public static Long barycenter(ArrayList<Long> listLong) {
+		if (listLong.size() == 0) {
+			return 0L;
+		}
+		Long avg = 0L;
+		for (Long n : listLong) {
+			avg += n;
+		}
+		return avg/listLong.size();
+	}
+
+	public static Double euclideanDistance(ArrayList<Long> series1, ArrayList<Long> series2, int i, int j) {
+		return Math.abs(series1.get(i).doubleValue() - series2.get(j).doubleValue());
+	}
+
+	public static void printDTW(Double[][][][] dtw) {
+		for (int i = 0; i < dtw.length; i++) {
+			for (int j = 0; j < dtw[i].length; j++) {
+				System.out.print("[" + dtw[i][j][0][0] + ", (" + dtw[i][j][1][0]+ ", " + dtw[i][j][1][1] + ")]");
+			}
+			System.out.println("");
+		}
+	}
+
+	public static Double[][][][] dtw(ArrayList<Long> series1, ArrayList<Long> series2) {
+		int n = series1.size();
+		int m = series2.size();
+
+		Double[][][][] mST = new Double[n][m][2][2];
+
+		// Algo
+		mST[0][0][0][0] = euclideanDistance(series1, series2, 0, 0);
+
+		mST[0][0][1][0] = -1D;
+		mST[0][0][1][1] = -1D;
+
+		for (int i = 1; i < n; i++) {
+			mST[i][0][0][0] = mST[i - 1][0][0][0] + euclideanDistance(series1, series2, i, 0);
+
+			mST[i][0][1][0] = i - 1D;
+			mST[i][0][1][1] = 0D;
+		}
+
+		for (int j = 1; j < m; j++) {
+			mST[0][j][0][0] = mST[0][j - 1][0][0] + euclideanDistance(series1, series2, 0, j);
+
+			mST[0][j][1][0] = 0D;
+			mST[0][j][1][1] = j - 1D;
+		}
+
+		Double[][] minimum;
+		for (Integer i = 1; i < n; i++) {
+			for (Integer j = 1; j < m; j++) {
+				minimum = minVal(mST[i - 1][j - 1], mST[i - 1][j], mST[i][j - 1]);
+
+				mST[i][j][0][0] = first(minimum) + euclideanDistance(series1, series2, i, j);
+
+				// Path
+				//mST[i][j][1] = second(minimum);
+
+				if (mST[i - 1][j - 1][0][0] == minimum[0][0]) {
+					mST[i][j][1][0] = i.doubleValue() - 1D;
+					mST[i][j][1][1] = j.doubleValue() - 1D;
+				} else if (mST[i - 1][j][0][0] == minimum[0][0]) {
+					mST[i][j][1][0] = i.doubleValue() - 1D;
+					mST[i][j][1][1] = j.doubleValue();
+				} else if (mST[i][j - 1][0][0] == minimum[0][0]) {
+					mST[i][j][1][0] = i.doubleValue();
+					mST[i][j][1][1] = j.doubleValue() - 1D;
+				}
+			}
+		}
+
+		return mST;
+	}
+
+	public static Double dtwDistance(ArrayList<Long> series1, ArrayList<Long> series2) {
+		return dtw(series1, series2)[series1.size() - 1][series2.size() - 1][0][0];
+	}
+
+	public static Double first(Double[][] v) {
+		return v[0][0];
+	}
+
+	public static Double[] second(Double[][] v) {
+		return v[1];
+	}
+
+	public static Double[][] minVal(Double[][] v1, Double[][] v2, Double[][] v3) {
+		if (first(v1) <= Math.min(first(v2), first(v3))) {
+			return v1;
+		} else if (first(v2) <= first(v3)) {
+			return v2;
+		} else {
+			return v3;
+		}
 	}
 
 	public static Double distance(ArrayList<Long> series1, ArrayList<Long> series2) {
